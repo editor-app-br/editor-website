@@ -9,7 +9,7 @@
   <a href="https://github.com/editor-app-br/editor-website/actions/workflows/ci.yml"><img src="https://github.com/editor-app-br/editor-website/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/Licen%C3%A7a-AGPL_v3-blue.svg" alt="Licença AGPL v3" /></a>
   <a href="https://prata.dev.br"><img src="https://img.shields.io/badge/Patroc%C3%ADnio-Prata_Consultoria-00c389.svg" alt="Patrocínio Prata Consultoria" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-v22+-green.svg" alt="Node.js" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-v24+-green.svg" alt="Node.js" /></a>
   <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-16-black.svg" alt="Next.js" /></a>
   <a href="https://github.com/editor-app-br/editor-website"><img src="https://img.shields.io/badge/GitHub-editor--app--br-181717.svg" alt="GitHub" /></a>
   <a href="https://editor.app.br"><img src="https://img.shields.io/badge/PWA-Pronto_Offline-orange.svg" alt="PWA Ready" /></a>
@@ -56,7 +56,7 @@ Consulte o documento **[LEGAL_NOTICE.md](./LEGAL_NOTICE.md)** para detalhes comp
 ## 🚀 Como Executar Localmente
 
 ### Pré-requisitos
-- [Node.js](https://nodejs.org) versão 22 ou superior
+- [Node.js](https://nodejs.org) versão 24 (Active LTS) ou superior
 - [pnpm](https://pnpm.io) versão 9 ou superior (`corepack enable && corepack prepare pnpm@latest --activate`)
 
 ```bash

@@ -27,7 +27,7 @@ RUN documentserver-generate-allfonts.sh false
 # ============================================================
 # Stage 2: Next.js website builder
 # ============================================================
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Re-declare args inside this stage to make them visible here.
 ARG DS_VERSION
