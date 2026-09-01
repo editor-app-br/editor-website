@@ -97,6 +97,22 @@ export function AboutView() {
             ONLYOFFICE Community Edition; a conversão WASM usa CryptPad x2t.
           </p>
           <ul className="space-y-3 text-sm mb-6">
+            <li className="text-text-secondary">
+              <span className="font-semibold text-foreground">
+                editor.app.br (este projeto)
+              </span>
+              {" — "}
+              © PRATA CONSULTORIA / comunidade
+              {" · "}
+              <a
+                href={PUBLIC_WEBSITE_REPO}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                repositório
+              </a>
+            </li>
             {UPSTREAM_COMPONENTS.map((item) => (
               <li key={item.name} className="text-text-secondary">
                 <span className="font-semibold text-foreground">{item.name}</span>
