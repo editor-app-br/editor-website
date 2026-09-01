@@ -1,0 +1,15 @@
+stages:
+  - sync
+
+sync_from_github:
+  stage: sync
+  image: alpine/git:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger" || $CI_PIPELINE_SOURCE == "schedule" || $CI_PIPELINE_SOURCE == "web"
+  before_script:
+    - git config --global user.email "ci-sync@prata.dev.br"
+    - git config --global user.name "GitLab Mirror Sync"
+  script:
+    - git clone --mirror https://oauth2:${GITHUB_READ_TOKEN}@github.com/editor-app-br/editor-website.git /tmp/upstream.git
+    - cd /tmp/upstream.git
+    - git push --mirror "https://oauth2:${GITLAB_PUSH_TOKEN}@gitlab.bra.prata.dev.br/editor/editor-website.git"

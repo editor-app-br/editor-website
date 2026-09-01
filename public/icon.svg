@@ -1,0 +1,202 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Top Face Gradient (Orange / Coral / Presentation) -->
+    <linearGradient id="topFace" x1="256" y1="55" x2="256" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8A65" />
+      <stop offset="45%" stop-color="#FF5722" />
+      <stop offset="100%" stop-color="#E64A19" />
+    </linearGradient>
+
+    <!-- Top Highlight Sheen -->
+    <linearGradient id="topSheen" x1="170" y1="110" x2="340" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.1" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Left Face Gradient (Blue / Documents) -->
+    <linearGradient id="leftFace" x1="90" y1="160" x2="256" y2="455" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="35%" stop-color="#2563EB" />
+      <stop offset="75%" stop-color="#1D4ED8" />
+      <stop offset="100%" stop-color="#0F2850" />
+    </linearGradient>
+
+    <!-- Left Face Inner Accent -->
+    <linearGradient id="leftAccent" x1="100" y1="200" x2="250" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#1E3A8A" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Right Face Gradient (Emerald / Sheets) -->
+    <linearGradient id="rightFace" x1="420" y1="160" x2="256" y2="455" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="35%" stop-color="#10B981" />
+      <stop offset="75%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#044E3A" />
+    </linearGradient>
+
+    <!-- Right Face Inner Accent -->
+    <linearGradient id="rightAccent" x1="410" y1="200" x2="260" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6EE7B7" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#064E3B" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Center Ridge Highlight -->
+    <linearGradient id="centerRidge" x1="256" y1="260" x2="256" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.6" />
+      <stop offset="60%" stop-color="#FFFFFF" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Left Top Ridge Highlight -->
+    <linearGradient id="leftRidge" x1="95" y1="165" x2="256" y2="258" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- Right Top Ridge Highlight -->
+    <linearGradient id="rightRidge" x1="415" y1="165" x2="256" y2="258" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.5" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- Soft Drop Shadow Filter -->
+    <filter id="cubeShadow" x="50" y="45" width="412" height="425" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0F172A" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <!-- Master Cube Group with Shadow -->
+  <g filter="url(#cubeShadow)">
+    <!-- LEFT FACE -->
+    <path
+      d="M 97 172 
+         C 93 174, 90 178, 90 183
+         L 90 347
+         C 90 353, 93 358, 98 361
+         L 250 448
+         C 254 450, 256 450, 256 447
+         L 256 260
+         L 97 172 Z"
+      fill="url(#leftFace)"
+    />
+    <!-- Left Face Highlight Overlay -->
+    <path
+      d="M 97 172 
+         L 256 260 
+         L 256 447 
+         L 98 361 
+         C 93 358, 90 353, 90 347
+         L 90 183
+         Z"
+      fill="url(#leftAccent)"
+    />
+
+    <!-- RIGHT FACE -->
+    <path
+      d="M 415 172
+         C 419 174, 422 178, 422 183
+         L 422 347
+         C 422 353, 419 358, 414 361
+         L 262 448
+         C 258 450, 256 450, 256 447
+         L 256 260
+         L 415 172 Z"
+      fill="url(#rightFace)"
+    />
+    <!-- Right Face Highlight Overlay -->
+    <path
+      d="M 415 172
+         L 256 260
+         L 256 447
+         L 414 361
+         C 419 358, 422 353, 422 347
+         L 422 183
+         Z"
+      fill="url(#rightAccent)"
+    />
+
+    <!-- TOP FACE -->
+    <path
+      d="M 250 63
+         C 254 61, 258 61, 262 63
+         L 415 152
+         C 420 155, 421 161, 417 165
+         L 262 255
+         C 258 257, 254 257, 250 255
+         L 95 165
+         C 91 161, 92 155, 97 152
+         Z"
+      fill="url(#topFace)"
+    />
+    <!-- Top Face Gloss Highlight -->
+    <path
+      d="M 250 63
+         C 254 61, 258 61, 262 63
+         L 415 152
+         C 420 155, 421 161, 417 165
+         L 262 255
+         C 258 257, 254 257, 250 255
+         L 95 165
+         C 91 161, 92 155, 97 152
+         Z"
+      fill="url(#topSheen)"
+    />
+
+    <!-- STYLIZED INNER EMBOSSED GROOVES / FACETS (Office Suite Layers) -->
+    <!-- Top Face Inset Tile -->
+    <path
+      d="M 253 105
+         C 255 104, 257 104, 259 105
+         L 355 161
+         C 358 163, 358 166, 355 168
+         L 259 223
+         C 257 224, 255 224, 253 223
+         L 157 168
+         C 154 166, 154 163, 157 161
+         Z"
+      fill="#FFFFFF"
+      fill-opacity="0.18"
+      stroke="#FFFFFF"
+      stroke-width="1.5"
+      stroke-opacity="0.3"
+    />
+
+    <!-- Left Face Inset Document Tile -->
+    <path
+      d="M 132 215
+         L 225 268
+         L 225 390
+         L 132 336
+         Z"
+      fill="#FFFFFF"
+      fill-opacity="0.1"
+      stroke="#FFFFFF"
+      stroke-width="1.2"
+      stroke-opacity="0.25"
+    />
+
+    <!-- Right Face Inset Spreadsheet Tile -->
+    <path
+      d="M 380 215
+         L 287 268
+         L 287 390
+         L 380 336
+         Z"
+      fill="#FFFFFF"
+      fill-opacity="0.12"
+      stroke="#FFFFFF"
+      stroke-width="1.2"
+      stroke-opacity="0.25"
+    />
+
+    <!-- CRISP RIDGE HIGHLIGHT LINES -->
+    <!-- Central Ridge -->
+    <line x1="256" y1="260" x2="256" y2="447" stroke="url(#centerRidge)" stroke-width="2.5" stroke-linecap="round" />
+    <!-- Left Top Ridge -->
+    <line x1="97" y1="167" x2="256" y2="258" stroke="url(#leftRidge)" stroke-width="2" stroke-linecap="round" />
+    <!-- Right Top Ridge -->
+    <line x1="415" y1="167" x2="256" y2="258" stroke="url(#rightRidge)" stroke-width="2" stroke-linecap="round" />
+  </g>
+</svg>

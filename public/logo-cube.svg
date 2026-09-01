@@ -1,0 +1,11 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="38.5867" y="19.2934" width="217.413" height="217.413" rx="108.707" fill="#FF5900"/>
+  <rect y="92.0037" width="114.234" height="114.234" rx="8" fill="url(#cube_grad)"/>
+  <path d="M227.293 128C173.151 128 147.294 128 147.294 128C147.294 128 147.295 74.9272 147.293 48C191.476 48 227.293 83.8172 227.293 128Z" fill="white" fill-opacity="0.85"/>
+  <defs>
+    <linearGradient id="cube_grad" x1="5.90076" y1="99.9329" x2="105.223" y2="200.025" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ED4801"/>
+      <stop offset="1" stop-color="#C33B00"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — Office Editor (editor.app.br)</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 40rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+        color: #0f172a;
+      }
+      h1 {
+        font-size: 1.35rem;
+      }
+      h2 {
+        font-size: 1.05rem;
+        margin-top: 1.5rem;
+      }
+      a {
+        color: #059669;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Privacy Policy</h1>
+    <p>
+      <strong>Office Editor — editor.app.br</strong> browser extension<br />
+      Publisher: PRATA CONSULTORIA EM TECNOLOGIA DA INFORMACAO LTDA
+      (CNPJ 48.889.573/0001-44)<br />
+      Contact: <a href="mailto:contato@prata.dev.br">contato@prata.dev.br</a><br />
+      Last updated: 2026-09-01
+    </p>
+
+    <h2>What this extension does</h2>
+    <p>
+      The extension helps
+      <a href="https://editor.app.br">editor.app.br</a> open documents that the
+      page cannot fetch alone (local <code>file://</code> paths and some
+      cross-origin HTTP(S) URLs). Document bytes are read in your browser and
+      passed to the editor page via <code>postMessage</code>.
+    </p>
+
+    <h2>Data collection</h2>
+    <p>
+      This extension does <strong>not</strong> collect, sell, or transmit personal
+      data to our servers. It does not include analytics or advertising SDKs.
+      Document contents are not uploaded by the extension; they remain in the
+      browser process for the editor.app.br tab.
+    </p>
+
+    <h2>Permissions</h2>
+    <ul>
+      <li>
+        <strong>Host access (optional)</strong> — requested only when you open a
+        document from a specific website or <code>file://</code> path. Chrome
+        shows a permission prompt per origin (not at install). Used so the hidden
+        proxy can fetch that URL and return the bytes to editor.app.br.
+      </li>
+      <li>
+        <strong>file:// access</strong> (optional; enable “Allow access to file
+        URLs”) — required to open documents from disk without uploading them.
+      </li>
+    </ul>
+
+    <h2>Third parties</h2>
+    <p>
+      The extension only talks to the editor.app.br (and related) page that
+      embeds it, and to the URL the user asked to open. We do not share data with
+      third parties through this extension.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      Material changes to this policy will be reflected on this page and, when
+      required, in the Chrome Web Store listing.
+    </p>
+  </body>
+</html>
