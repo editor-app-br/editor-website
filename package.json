@@ -15,6 +15,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "pnpm build",
     "svgr": "npx @svgr/cli --out-dir components/svg --typescript -- public/svg",
     "pages:dev": "npx wrangler pages dev ./out",
     "deploy": "pnpm build && npx wrangler pages deploy ./out --project-name=office-website",

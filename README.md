@@ -6,6 +6,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/editor-app-br/editor-website/actions/workflows/ci.yml"><img src="https://github.com/editor-app-br/editor-website/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="./LICENSE.txt"><img src="https://img.shields.io/badge/Licen%C3%A7a-AGPL_v3-blue.svg" alt="Licença AGPL v3" /></a>
   <a href="https://prata.dev.br"><img src="https://img.shields.io/badge/Patroc%C3%ADnio-Prata_Consultoria-00c389.svg" alt="Patrocínio Prata Consultoria" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-v22+-green.svg" alt="Node.js" /></a>
