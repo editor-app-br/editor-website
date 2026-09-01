@@ -13,6 +13,7 @@ import { DocumentIcon } from "@/components/document-icon";
 import { getDocConfig } from "@/lib/document-types";
 import type { Template } from "@/utils/templates";
 import { usePageTitle } from "@/hooks/use-page-title";
+import { useAppStore } from "@/store";
 import { PUBLIC_WEBSITE_REPO } from "@/utils/attribution";
 import {
   getRecentFiles,
