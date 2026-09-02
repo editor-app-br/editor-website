@@ -41,10 +41,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# build extras
+/plugins
+/Caddyfile
+
 *.local
 
 # Tencent Cloud EdgeOne
 .env
 .edgeone/*
 .tef_dist/*
-  

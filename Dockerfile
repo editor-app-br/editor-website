@@ -81,7 +81,11 @@ COPY --from=documentserver /var/www/onlyoffice/documentserver/sdkjs-plugins ./v$
 RUN cp "./v${DS_VERSION}-${HASH}/web-apps/apps/api/documents/api.js.tpl" \
        "./v${DS_VERSION}-${HASH}/web-apps/apps/api/documents/api.js"
 
+# Copy editor plugins tree to /srv/plugins for plugins.editor.app.br (:8081)
+COPY plugins /srv/plugins
+
 # Copy Caddyfile.
 COPY Caddyfile /etc/caddy/Caddyfile
 
-EXPOSE 80 443
+EXPOSE 80 8081 443
+

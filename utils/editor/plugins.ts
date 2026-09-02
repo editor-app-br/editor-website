@@ -1,4 +1,4 @@
-export const pluginsBase = "https://office-plugins.ziziyi.com/v9/sdkjs-plugins";
+export const pluginsBase = "https://plugins.editor.app.br/sdkjs-plugins";
 
 export const allPlugins = [
   "ai",

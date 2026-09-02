@@ -18,6 +18,11 @@ export const PROJECT_REPOS = {
     web: "https://gitlab.bra.prata.dev.br/editor/deploy",
     git: "https://gitlab.bra.prata.dev.br/editor/deploy.git",
   },
+  plugins: {
+    label: "editor-plugins (ONLYOFFICE plugins + Marketplace)",
+    web: "https://github.com/editor-app-br/editor-plugins",
+    git: "https://github.com/editor-app-br/editor-plugins.git",
+  },
 } as const;
 
 export const UPSTREAM_COMPONENTS = [
