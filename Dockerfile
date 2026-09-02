@@ -11,7 +11,7 @@ ARG DS_VERSION=9.3.1
 # Revision counter. Bump this (--build-arg HASH=2) whenever you want
 # to bust the browser cache for the OnlyOffice assets without changing
 # the DocumentServer version itself.
-ARG HASH=1
+ARG HASH=2
 
 # ============================================================
 # Stage 1: OnlyOffice DocumentServer assets source
