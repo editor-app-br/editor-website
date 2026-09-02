@@ -60,7 +60,7 @@ COPY scripts ./scripts
 COPY store ./store
 COPY types ./types
 COPY utils ./utils
-COPY components.json eslint.config.mjs next-env.d.ts next.config.ts postcss.config.mjs svgo.config.js tsconfig.json ./
+COPY components.json eslint.config.mjs next.config.ts postcss.config.mjs svgo.config.js tsconfig.json ./
 
 # Run the Next.js static export build.
 RUN pnpm build
