@@ -48,8 +48,19 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Install dependencies (frozen lockfile for reproducibility).
 RUN pnpm install --frozen-lockfile
 
-# Copy the rest of the source code.
-COPY . .
+# Copy the website source code (explicit paths isolate Next.js from plugins tree).
+COPY app ./app
+COPY components ./components
+COPY hooks ./hooks
+COPY i18n ./i18n
+COPY lib ./lib
+COPY messages ./messages
+COPY public ./public
+COPY scripts ./scripts
+COPY store ./store
+COPY types ./types
+COPY utils ./utils
+COPY components.json eslint.config.mjs next-env.d.ts next.config.ts postcss.config.mjs svgo.config.js tsconfig.json ./
 
 # Run the Next.js static export build.
 RUN pnpm build
