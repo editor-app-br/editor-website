@@ -47,9 +47,9 @@ export function SourceView() {
           ))}
         </ul>
         <p className="text-xs text-text-secondary leading-relaxed">
-          O código do site é público no GitHub. Extensão e deploy no GitLab
-          interno podem exigir login; peça uma cópia do tarball correspondente
-          em{" "}
+          Site e extensão são públicos no GitHub. O repositório de deploy no
+          GitLab interno pode exigir login; peça uma cópia do tarball
+          correspondente em{" "}
           <a
             href={`mailto:${LEGAL_CONTACT}`}
             className="text-primary hover:underline"

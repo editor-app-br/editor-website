@@ -10,8 +10,8 @@ export const PROJECT_REPOS = {
   },
   extension: {
     label: "editor-google-app (Chrome extension)",
-    web: "https://gitlab.bra.prata.dev.br/editor/editor-google-app",
-    git: "https://gitlab.bra.prata.dev.br/editor/editor-google-app.git",
+    web: "https://github.com/editor-app-br/editor-google-app",
+    git: "https://github.com/editor-app-br/editor-google-app.git",
   },
   deploy: {
     label: "deploy (Docker / Helm)",

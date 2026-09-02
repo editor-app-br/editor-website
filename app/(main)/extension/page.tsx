@@ -41,9 +41,14 @@ export default function ExtensionPage() {
         </h2>
         <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground leading-relaxed">
           <li>
-            Clone or copy the{" "}
-            <code className="text-foreground">editor-google-app</code> folder
-            from the editor.app.br project.
+            Clone{" "}
+            <a
+              href="https://github.com/editor-app-br/editor-google-app"
+              className="text-primary font-medium hover:underline"
+            >
+              github.com/editor-app-br/editor-google-app
+            </a>
+            .
           </li>
           <li>
             Open{" "}
