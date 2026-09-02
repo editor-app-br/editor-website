@@ -6,11 +6,11 @@
  */
 
 /**
- * Chrome / Edge store (or install docs) URL for the companion extension.
- * Empty string → hide sidebar card, first-visit prompt, and install CTA.
- * Set e.g. "https://editor.app.br/extension" or the CWS listing when ready.
+ * Chrome Web Store listing. Empty string hides sidebar card, first-visit
+ * prompt, and install CTA.
  */
-export const EXTENSION_STORE_URL = "";
+export const EXTENSION_STORE_URL =
+  "https://chromewebstore.google.com/detail/nnadbldffcpgjfdambkbbknplpjpdcfn";
 
 /**
  * Get the extension ID from the meta tag injected by the content script.

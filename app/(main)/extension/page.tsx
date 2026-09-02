@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { EXTENSION_STORE_URL } from "@/utils/extension";
 
 export const metadata: Metadata = {
   title: "Browser extension",
@@ -35,6 +36,23 @@ export default function ExtensionPage() {
         <code className="text-foreground">editor-google-app</code> (AGPL-3.0).
       </p>
 
+      <section className="space-y-3 mb-10">
+        <h2 className="text-base font-semibold text-foreground">
+          Chrome Web Store
+        </h2>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Install from the official listing for Chrome and Edge (Chromium).
+        </p>
+        <a
+          href={EXTENSION_STORE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90"
+        >
+          Add to Chrome
+        </a>
+      </section>
+
       <section className="space-y-4 mb-10">
         <h2 className="text-base font-semibold text-foreground">
           Install (unpacked)
@@ -66,14 +84,6 @@ export default function ExtensionPage() {
             <strong className="text-foreground">reload</strong> the tab.
           </li>
         </ol>
-      </section>
-
-      <section className="space-y-3 mb-10">
-        <h2 className="text-base font-semibold text-foreground">Chrome Web Store</h2>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          A public store listing is not published yet. When it is, this page will
-          link to it. Until then, use Load unpacked from the source tree.
-        </p>
       </section>
 
       <p className="text-sm">
