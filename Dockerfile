@@ -50,6 +50,7 @@ RUN pnpm install --frozen-lockfile
 
 # Copy the website source code (explicit paths isolate Next.js from plugins tree).
 COPY app ./app
+COPY assets ./assets
 COPY components ./components
 COPY hooks ./hooks
 COPY i18n ./i18n
