@@ -25,8 +25,19 @@ export class X2tConverter {
       });
 
       this.x2t = (window as any).Module;
+      if (!this.x2t) {
+        reject(new Error("x2t Module did not load"));
+        return;
+      }
+      // Emscripten may already have finished before we attach the hook.
       await new Promise<void>((res) => {
+        if (this.x2t.calledRun) {
+          res();
+          return;
+        }
+        const previous = this.x2t.onRuntimeInitialized;
         this.x2t.onRuntimeInitialized = () => {
+          if (typeof previous === "function") previous();
           res();
         };
       });

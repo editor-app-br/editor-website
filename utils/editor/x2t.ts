@@ -1,191 +1,193 @@
 /**
- * X2T Converter with Web Worker Support
+ * X2T converter. Prefer a Web Worker; fall back to the main thread.
  *
- * This module provides a main-thread proxy that delegates heavy conversion
- * operations to a Web Worker, preventing UI blocking.
+ * Next.js static export currently copies `x2t.worker.ts` to
+ * `/_next/static/media/x2t.worker.*.ts` (MIME text/vnd.trolltech.linguist +
+ * nosniff). Chrome refuses to start that Worker, convert() hangs, embed never
+ * sends documentReady, and autosave shows "Ocorreu um erro / Baixar como".
  */
 
+import { converter as mainThreadConverter } from "./x2t.main";
 import { X2tConvertParams, X2tConvertResult } from "./types";
 
+const WORKER_CONVERT_MS = 20_000;
+
 interface PendingMessage {
-  resolve: (value: any) => void;
+  resolve: (value: X2tConvertResult) => void;
   reject: (error: Error) => void;
 }
 
 interface WorkerResponse {
-  id: number;
+  id?: number;
   type: string;
-  payload?: any;
+  payload?: X2tConvertResult;
   error?: string;
+}
+
+function fileExt(name: string) {
+  const base = name.split("/").pop() || name;
+  const dot = base.lastIndexOf(".");
+  return dot >= 0 ? base.slice(dot + 1) : base;
+}
+
+function workerUrlIsCompiled(url: URL): boolean {
+  return /\.js(\?|$)/.test(url.pathname);
+}
+
+async function convertOnMain(params: X2tConvertParams): Promise<X2tConvertResult> {
+  const result = await mainThreadConverter.convert(
+    params.data,
+    fileExt(params.fileFrom),
+    fileExt(params.fileTo),
+  );
+  const media: X2tConvertResult["media"] = {};
+  for (const row of result.medias || []) {
+    media[row.name] = row.data as Uint8Array<ArrayBuffer>;
+  }
+  let output: X2tConvertResult["output"] = null;
+  if (result.output) {
+    output =
+      result.output instanceof Uint8Array
+        ? (result.output as Uint8Array<ArrayBuffer>)
+        : new Uint8Array(result.output);
+  }
+  return { output, media };
 }
 
 export class X2tConverter {
   private worker: Worker | null = null;
   private initPromise: Promise<void> | null = null;
+  private useMain = false;
   private messageId = 0;
   private pendingMessages = new Map<number, PendingMessage>();
 
   constructor() {
-    // Auto-initialize worker on construction
-    if (globalThis.Worker) {
-      this.init();
+    if (typeof globalThis.Worker === "function") {
+      void this.init();
+    } else {
+      this.useMain = true;
     }
   }
 
-  /**
-   * Get next unique message ID
-   */
   private getNextId(): number {
-    return ++this.messageId;
+    this.messageId += 1;
+    return this.messageId;
   }
 
-  /**
-   * Send message to worker and wait for response
-   */
-  private sendMessage<T>(type: string, payload?: any): Promise<T> {
-    return new Promise((resolve, reject) => {
-      if (!this.worker) {
-        reject(new Error("Worker not initialized"));
-        return;
-      }
-
-      const id = this.getNextId();
-      this.pendingMessages.set(id, { resolve, reject });
-
-      // For convert messages, use Transferable if payload contains ArrayBuffer
-      if (type === "convert" && payload?.data instanceof ArrayBuffer) {
-        this.worker.postMessage({ id, type, payload }, [payload.data]);
-      } else {
-        this.worker.postMessage({ id, type, payload });
-      }
-    });
-  }
-
-  /**
-   * Handle worker response messages
-   */
   private handleWorkerMessage = (event: MessageEvent<WorkerResponse>) => {
     const { id, type, payload, error } = event.data;
-
-    // Skip ready message
-    if (type === "ready") {
-      console.log("[X2tConverter] Worker ready");
-      return;
-    }
-
+    if (type === "ready") return;
+    if (id == null) return;
     const pending = this.pendingMessages.get(id);
     if (!pending) return;
-
     this.pendingMessages.delete(id);
-
     if (type === "error") {
       pending.reject(new Error(error || "Unknown worker error"));
-    } else {
-      pending.resolve(payload);
+      return;
     }
+    pending.resolve(payload as X2tConvertResult);
   };
 
-  /**
-   * Handle worker errors
-   */
+  private failWorker(message: string) {
+    this.useMain = true;
+    for (const pending of this.pendingMessages.values()) {
+      pending.reject(new Error(message));
+    }
+    this.pendingMessages.clear();
+    try {
+      this.worker?.terminate();
+    } catch {
+      /* already dead */
+    }
+    this.worker = null;
+  }
+
   private handleWorkerError = (error: ErrorEvent) => {
     console.error("[X2tConverter] Worker error:", error);
-
-    // Reject all pending messages
-    for (const [id, pending] of this.pendingMessages) {
-      pending.reject(new Error(`Worker error: ${error.message}`));
-      this.pendingMessages.delete(id);
-    }
+    this.failWorker(`Worker error: ${error.message}`);
   };
 
-  /**
-   * Initialize the worker (automatically called on construction)
-   */
   public init(): Promise<void> {
-    if (this.initPromise) {
-      return this.initPromise;
-    }
+    if (this.initPromise) return this.initPromise;
 
-    this.initPromise = new Promise<void>((resolve, reject) => {
+    this.initPromise = new Promise<void>((resolve) => {
       try {
-        // Create worker using Next.js compatible syntax
-        // Worker auto-initializes x2t internally
-        this.worker = new Worker(new URL("./x2t.worker.ts", import.meta.url));
-
-        // Set up message handlers
+        const workerUrl = new URL("./x2t.worker.ts", import.meta.url);
+        if (!workerUrlIsCompiled(workerUrl)) {
+          console.warn(
+            "[X2tConverter] Worker asset is not JS (%s); using main-thread x2t",
+            workerUrl.pathname,
+          );
+          this.useMain = true;
+          resolve();
+          return;
+        }
+        this.worker = new Worker(workerUrl);
         this.worker.onmessage = this.handleWorkerMessage;
         this.worker.onerror = this.handleWorkerError;
-
-        console.log("[X2tConverter] Worker created");
         resolve();
       } catch (err) {
-        this.initPromise = null;
-        reject(err);
+        console.warn("[X2tConverter] Worker create failed; using main-thread x2t", err);
+        this.useMain = true;
+        resolve();
       }
     });
 
     return this.initPromise;
   }
 
-  /**
-   * Convert document from one format to another
-   */
-  public async convert({
-    data,
-    fileFrom,
-    fileTo,
-    media,
-    fonts,
-    themes,
-  }: X2tConvertParams): Promise<X2tConvertResult> {
-    await this.init();
-
-    const cloneMap = (map?: { [key: string]: Uint8Array }) => {
-      if (!map) return undefined;
-      return Object.fromEntries(
-        Object.entries(map).map(([key, value]) => [key, value.slice(0)])
-      );
-    };
-
-    // Clone ArrayBuffer since it will be transferred
-    const dataClone = data.slice(0);
-
-    const payload = {
-      data: dataClone,
-      fileFrom,
-      fileTo,
-      media: cloneMap(media),
-      fonts: cloneMap(fonts),
-      themes: cloneMap(themes),
-    };
-    return this.sendMessage<X2tConvertResult>("convert", payload);
+  private sendMessage(payload: X2tConvertParams): Promise<X2tConvertResult> {
+    return new Promise((resolve, reject) => {
+      if (!this.worker) {
+        reject(new Error("Worker not initialized"));
+        return;
+      }
+      const id = this.getNextId();
+      const timer = window.setTimeout(() => {
+        this.pendingMessages.delete(id);
+        reject(new Error("x2t worker convert timed out"));
+      }, WORKER_CONVERT_MS);
+      this.pendingMessages.set(id, {
+        resolve: (value) => {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          window.clearTimeout(timer);
+          reject(error);
+        },
+      });
+      if (payload.data instanceof ArrayBuffer) {
+        this.worker.postMessage({ id, type: "convert", payload }, [payload.data]);
+      } else {
+        this.worker.postMessage({ id, type: "convert", payload });
+      }
+    });
   }
 
-  /**
-   * Terminate the worker and release resources
-   */
-  public terminate(): void {
-    if (this.worker) {
-      // Reject all pending messages
-      for (const [id, pending] of this.pendingMessages) {
-        pending.reject(new Error("Worker terminated"));
-        this.pendingMessages.delete(id);
-      }
-
-      this.worker.terminate();
-      this.worker = null;
-      this.initPromise = null;
-      console.log("[X2tConverter] Worker terminated");
+  public async convert(params: X2tConvertParams): Promise<X2tConvertResult> {
+    await this.init();
+    if (this.useMain || !this.worker) {
+      return convertOnMain(params);
+    }
+    try {
+      const dataClone = params.data.slice(0);
+      return await this.sendMessage({ ...params, data: dataClone });
+    } catch (err) {
+      console.warn("[X2tConverter] Worker convert failed; using main-thread x2t", err);
+      this.useMain = true;
+      return convertOnMain(params);
     }
   }
 
-  /**
-   * Check if worker is initialized
-   */
+  public terminate(): void {
+    this.failWorker("Worker terminated");
+    this.initPromise = null;
+  }
+
   public get isInitialized(): boolean {
-    return this.worker !== null && this.initPromise !== null;
+    return this.useMain || this.worker !== null;
   }
 }
 
-// Default converter instance
 export const converter = new X2tConverter();
