@@ -8,8 +8,9 @@
 import { converter as mainThreadConverter } from "./x2t.main";
 import { X2tConvertParams, X2tConvertResult } from "./types";
 
-const WORKER_URL = "/x2t-worker.js";
-const WORKER_CONVERT_MS = 45_000;
+// Not /x2t-worker.js: nginx `^/x2t` caches that path as immutable.
+const WORKER_URL = "/office-x2t-worker.js";
+const WORKER_CONVERT_MS = 12_000;
 
 interface PendingMessage {
   resolve: (value: X2tConvertResult) => void;

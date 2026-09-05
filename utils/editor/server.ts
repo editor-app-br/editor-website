@@ -73,6 +73,7 @@ export class EditorServer {
     this.title = title;
     const buffer = await file.arrayBuffer();
     this.loadPromise = this.loadDocument(buffer, this.fileType);
+    await this.loadPromise;
 
     return {
       id: this.id,
@@ -135,6 +136,7 @@ export class EditorServer {
     this.id = randomId();
     this.title = title;
     this.loadPromise = this.loadDocument(() => loader(url), this.fileType);
+    await this.loadPromise;
 
     return {
       id: this.id,
