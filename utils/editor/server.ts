@@ -393,7 +393,7 @@ export class EditorServer {
   async handleRequest(req: Request) {
     const u = new URL(req.url);
 
-    const { send } = this;
+    const { id: key, send } = this;
 
     if (u.pathname.includes("/downloadas/")) {
       try {
