@@ -341,6 +341,7 @@ export default function EmbedPage() {
             review: false,
             print: false,
             download: !isPreview,
+            plugins: pluginModeRef.current === "agent",
           },
         },
         documentType,
@@ -499,6 +500,7 @@ export default function EmbedPage() {
         const src = node.getAttribute("src") || "";
         if (
           id.includes("7E4A1C90") ||
+          id.startsWith("iframe_asc.") ||
           src.includes("/office-plugins/agent") ||
           node === doc.getElementById(`iframe_${guid}`)
         ) {

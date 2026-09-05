@@ -667,13 +667,16 @@
   }
 
   function install() {
+    if (!install.listening) {
+      install.listening = true
+      window.addEventListener("message", onHostMessage)
+    }
     if (!window.Asc || !window.Asc.plugin) {
       install.tries = (install.tries || 0) + 1
-      if (install.tries > 40) return
+      if (install.tries > 200) return
       window.setTimeout(install, 100)
       return
     }
-    window.addEventListener("message", onHostMessage)
     window.Asc.plugin.init = function () {
       window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
       window.Asc.plugin.onExternalPluginMessage = handle

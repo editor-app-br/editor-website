@@ -3,7 +3,15 @@ import { MockSocket } from "./socket";
 import { User, Participant, AscSaveTypes, AvsFileType, ServerOptions } from "./types";
 import { emptyDocx, emptyPdf, emptyPptx, emptyXlsx } from "./empty";
 import { getDocumentType, getFileExt } from "./utils";
-import { allPlugins, featuredPlugins, getAgentPluginsData, getPluginsData } from "./plugins";
+import {
+  AGENT_PLUGIN_MANIFEST,
+  allPlugins,
+  featuredPlugins,
+  getAgentPluginsData,
+  getPluginsData,
+  isAgentPluginConfigPath,
+  isPluginsJsonPath,
+} from "./plugins";
 import {
   isNativeOfficePersistExport,
   isPdfDownloadAs,
@@ -543,7 +551,9 @@ export class EditorServer {
       return Response.json({ [pathname]: url });
     }
 
-    if (u.pathname == "/plugins.json") {
+    // DocsAPI loads ../../../../plugins.json from /v9.3.1-2/web-apps/.../main/
+    // so the path is /v9.3.1-2/plugins.json, not /plugins.json.
+    if (isPluginsJsonPath(u.pathname)) {
       const state = this.options.getState?.();
       if (state?.plugins == "none") {
         return Response.json({ url: "", pluginsData: [], autostart: [] });
@@ -555,6 +565,11 @@ export class EditorServer {
         return Response.json(getPluginsData(allPlugins));
       }
       return Response.json(getPluginsData(featuredPlugins));
+    }
+
+    if (isAgentPluginConfigPath(u.pathname)) {
+      const baseUrl = `${location.origin}/office-plugins/agent/`;
+      return Response.json({ ...AGENT_PLUGIN_MANIFEST, baseUrl });
     }
 
     return null;

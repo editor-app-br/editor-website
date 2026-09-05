@@ -19,6 +19,7 @@ export function createXHRProxy(
     private _requestUrl: string = "";
     private _requestHeaders: Headers = new Headers();
     private _requestBody: any = null;
+    private _async: boolean = true;
 
     /**
      * Register global middleware
@@ -45,6 +46,7 @@ export function createXHRProxy(
       this._requestUrl = url.toString();
       this._requestHeaders = new Headers();
       this._isMocked = false;
+      this._async = async !== false;
 
       // Call native open
       super.open(
@@ -67,6 +69,13 @@ export function createXHRProxy(
 
     send(body?: Document | XMLHttpRequestBodyInit | null): void {
       this._requestBody = body;
+
+      // OnlyOffice plugin bootstrap uses sync XHR (plugins.json / config.json).
+      // Async middleware would return empty responseText immediately.
+      if (!this._async) {
+        super.send(body);
+        return;
+      }
 
       // Try to run middleware
       this._tryMiddlewares()

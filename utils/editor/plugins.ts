@@ -69,6 +69,42 @@ export function getPluginConfigUrl(name: string) {
 export const AGENT_PLUGIN_GUID = "asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}";
 export const AGENT_PLUGIN_PATH = "/office-plugins/agent/config.json";
 
+/** Keep in sync with public/office-plugins/agent/config.json */
+export const AGENT_PLUGIN_MANIFEST = {
+  name: "Agent",
+  nameLocale: { en: "Agent", "pt-BR": "Agente" },
+  guid: AGENT_PLUGIN_GUID,
+  version: "1.2.0",
+  variations: [
+    {
+      description: "Document tools for the host Agent",
+      url: "index.html",
+      icons: ["icon.png", "icon.png"],
+      isViewer: false,
+      EditorsSupport: ["word", "cell", "slide", "pdf"],
+      isVisual: false,
+      isModal: false,
+      isInsideMode: false,
+      // OnlyOffice 9 hides isSystem plugins from the start list (`visible && !isSystem`).
+      // type:background still autostarts a hidden iframe.
+      isSystem: false,
+      type: "background",
+      initDataType: "none",
+      initData: "",
+      isUpdateOleOnResize: false,
+      buttons: [] as unknown[],
+    },
+  ],
+};
+
+export function isPluginsJsonPath(pathname: string) {
+  return pathname === "/plugins.json" || pathname.endsWith("/plugins.json");
+}
+
+export function isAgentPluginConfigPath(pathname: string) {
+  return pathname === AGENT_PLUGIN_PATH || pathname.endsWith(AGENT_PLUGIN_PATH);
+}
+
 export function getPluginsData(list: string[]) {
   return {
     url: "",

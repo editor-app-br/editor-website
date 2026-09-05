@@ -6,11 +6,18 @@
     <script>
       (function () {
         var fallbacks = ["/v9.3.1-2", "/v9.3.1-1", "/v9.3.0.24-1"];
+        function loadPlugin() {
+          var plugin = document.createElement("script");
+          plugin.src = "plugin.js";
+          document.head.appendChild(plugin);
+        }
         function load(src, rest) {
           var script = document.createElement("script");
           script.src = src;
+          script.onload = loadPlugin;
           script.onerror = function () {
             if (rest.length) load(rest[0] + "/sdkjs-plugins/v1/plugins.js", rest.slice(1));
+            else loadPlugin();
           };
           document.head.appendChild(script);
         }
@@ -26,7 +33,6 @@
           });
       })();
     </script>
-    <script src="plugin.js"></script>
   </head>
   <body></body>
 </html>
