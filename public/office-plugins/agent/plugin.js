@@ -643,6 +643,29 @@
     return true
   }
 
+  function isHostCommand(data) {
+    return !!(
+      data &&
+      typeof data === "object" &&
+      typeof data.requestId === "string" &&
+      typeof data.type === "string" &&
+      data.type !== "agent-doc"
+    )
+  }
+
+  function onHostMessage(event) {
+    var data = event && event.data
+    if (typeof data === "string") {
+      try {
+        data = JSON.parse(data)
+      } catch (err) {
+        return
+      }
+    }
+    if (!isHostCommand(data)) return
+    handle(data)
+  }
+
   function install() {
     if (!window.Asc || !window.Asc.plugin) {
       install.tries = (install.tries || 0) + 1
@@ -650,6 +673,7 @@
       window.setTimeout(install, 100)
       return
     }
+    window.addEventListener("message", onHostMessage)
     window.Asc.plugin.init = function () {
       window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
       window.Asc.plugin.onExternalPluginMessage = handle

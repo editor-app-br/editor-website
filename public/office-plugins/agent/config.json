@@ -8,7 +8,7 @@
       "description": "Document tools for the host Agent",
       "url": "index.html",
       "icons": ["icon.png", "icon.png"],
-      "isViewer": true,
+      "isViewer": false,
       "EditorsSupport": ["word", "cell", "slide", "pdf"],
       "isVisual": false,
       "isModal": false,

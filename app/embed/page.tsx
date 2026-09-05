@@ -79,6 +79,7 @@ export default function EmbedPage() {
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
   const openingRef = useRef(false);
+  const pluginReadyFromChild = useRef(false);
 
   const stopReadyPing = () => {
     if (readyTimerRef.current != null) {
@@ -159,7 +160,11 @@ export default function EmbedPage() {
         });
         return;
       }
-      if (body.requestId && body.requestId !== "ready") {
+      if (body.requestId === "ready") {
+        pluginReadyFromChild.current = true;
+        return;
+      }
+      if (body.requestId) {
         postToHost({
           type: "commandResult",
           requestId: String(body.requestId),
@@ -294,6 +299,7 @@ export default function EmbedPage() {
     };
 
     const destroyEditor = () => {
+      pluginReadyFromChild.current = false;
       try {
         editorRef.current?.destroyEditor?.();
       } catch {
@@ -404,7 +410,24 @@ export default function EmbedPage() {
               'iframe[name="frameEditor"]',
             );
             applyEditorChrome(iframe?.contentDocument);
-            postToHost({ type: "documentReady" });
+            if (pluginModeRef.current !== "agent") {
+              postToHost({ type: "documentReady" });
+              return;
+            }
+            // Host marks the Agent ready on documentReady and immediately
+            // sends doc_*. Wait until the plugin can take commands.
+            const started = Date.now();
+            const finish = () => postToHost({ type: "documentReady" });
+            if (pluginCanReceive()) {
+              finish();
+              return;
+            }
+            const tick = window.setInterval(() => {
+              if (pluginCanReceive() || Date.now() - started > 20_000) {
+                window.clearInterval(tick);
+                finish();
+              }
+            }, 200);
           },
           onDocumentStateChange: (e: { data: boolean }) => {
             if (e.data) {
@@ -452,22 +475,60 @@ export default function EmbedPage() {
       };
     };
 
-    const deliverPluginCommand = (data: Record<string, unknown>): boolean => {
-      const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
-      let plugin: HTMLIFrameElement | null = null;
+    const findPluginFrames = (): HTMLIFrameElement[] => {
+      const editor = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
+      let doc: Document | null = null;
       try {
-        plugin = iframe?.contentDocument?.getElementById(
-          `iframe_${AGENT_PLUGIN_GUID}`,
-        ) as HTMLIFrameElement | null;
+        doc = editor?.contentDocument || null;
       } catch {
-        plugin = null;
+        doc = null;
       }
-      const api = plugin?.contentWindow as (Window & { Asc?: { plugin?: PluginHost } }) | null;
-      const host = api?.Asc?.plugin;
-      if (!host?.onExternalPluginMessage) return false;
-      host.onExternalPluginMessage(data);
-      return true;
+      if (!doc) return [];
+      const guid = AGENT_PLUGIN_GUID;
+      const shortGuid = guid.replace(/^asc\./, "");
+      const nodes = [
+        doc.getElementById(`iframe_${guid}`),
+        doc.getElementById(`iframe_${shortGuid}`),
+        doc.getElementById(guid),
+        ...Array.from(doc.querySelectorAll("iframe")),
+      ];
+      const seen = new Set<HTMLIFrameElement>();
+      for (const node of nodes) {
+        if (!(node instanceof HTMLIFrameElement)) continue;
+        const id = node.id || "";
+        const src = node.getAttribute("src") || "";
+        if (
+          id.includes("7E4A1C90") ||
+          src.includes("/office-plugins/agent") ||
+          node === doc.getElementById(`iframe_${guid}`)
+        ) {
+          seen.add(node);
+        }
+      }
+      return [...seen];
     };
+
+    const deliverPluginCommand = (data: Record<string, unknown>): boolean => {
+      const frames = findPluginFrames();
+      let delivered = false;
+      for (const plugin of frames) {
+        const api = plugin.contentWindow as (Window & { Asc?: { plugin?: PluginHost } }) | null;
+        const host = api?.Asc?.plugin;
+        if (host?.onExternalPluginMessage) {
+          host.onExternalPluginMessage(data);
+          delivered = true;
+        }
+        try {
+          plugin.contentWindow?.postMessage(data, "*");
+          delivered = true;
+        } catch {
+          /* cross-origin plugin frame */
+        }
+      }
+      return delivered;
+    };
+
+    const pluginCanReceive = () => pluginReadyFromChild.current || findPluginFrames().length > 0;
 
     const deliverPluginCommandWhenReady = (data: Record<string, unknown>, requestId?: string) => {
       if (deliverPluginCommand(data)) return;
@@ -477,7 +538,7 @@ export default function EmbedPage() {
           window.clearInterval(tick);
           return;
         }
-        if (Date.now() - started < 12_000) return;
+        if (Date.now() - started < 20_000) return;
         window.clearInterval(tick);
         postToHost({
           type: "commandResult",
