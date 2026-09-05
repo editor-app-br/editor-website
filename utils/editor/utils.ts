@@ -84,7 +84,7 @@ export function getAppRoot(versionParam?: string | null): string {
     if (clean.startsWith("v")) return `/${clean}`;
     return `/v${clean}`;
   }
-  return process.env.NEXT_PUBLIC_APP_ROOT || "/v9.3.1-1";
+  return process.env.NEXT_PUBLIC_APP_ROOT || "/v9.3.1-2";
 }
 
 export const APP_ROOT = getAppRoot();

@@ -59,4 +59,4 @@ export const PUBLIC_ABOUT_URL = `${PUBLIC_EDITOR_URL}/about`;
 export const PUBLIC_LEGAL_URL = `${PUBLIC_EDITOR_URL}/legal`;
 export const PUBLIC_SOURCE_URL = `${PUBLIC_EDITOR_URL}/source`;
 export const PUBLIC_INTEGRATE_URL = `${PUBLIC_EDITOR_URL}/integrate`;
-export const PUBLIC_CUBE_LOGO = "/editor_cube_transparent.png";
+export const PUBLIC_CUBE_LOGO = "/logo-cube.svg";

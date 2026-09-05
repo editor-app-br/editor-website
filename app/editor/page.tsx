@@ -14,10 +14,7 @@ import { createXHRProxy } from "@/utils/editor/xhr";
 import { DocEditor } from "@/utils/editor/types";
 import { createExtensionLoader } from "@/utils/extension";
 import InstallExtensionDialog from "@/components/install-extension-dialog";
-import {
-  EDITOR_WORDMARK_BLACK,
-  EDITOR_WORDMARK_WHITE,
-} from "@/utils/branding";
+import { EDITOR_CUBE_LOGO_SVG } from "@/utils/branding";
 
 export default function Page() {
   const server = useAppStore((state) => state.server);
@@ -143,8 +140,9 @@ export default function Page() {
               },
             },
             logo: {
-              image: location.origin + EDITOR_WORDMARK_BLACK,
-              imageDark: location.origin + EDITOR_WORDMARK_WHITE,
+              // OnlyOffice parses headerlogo as SVG. Wordmark/PNG throw setAttribute.
+              image: location.origin + EDITOR_CUBE_LOGO_SVG,
+              imageDark: location.origin + EDITOR_CUBE_LOGO_SVG,
               url: location.origin,
             },
           },
