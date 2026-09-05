@@ -8,10 +8,24 @@
       error: error || null
     }
     var raw = JSON.stringify(payload)
-    try {
-      window.top.postMessage(raw, "*")
-    } catch (err) {
-      window.parent.postMessage(raw, "*")
+    // Walk every ancestor. COOP/cross-origin can make window.top throw, and
+    // parent-only delivery stops at frameEditor (which does not forward us).
+    var seen = []
+    var win = window
+    while (win) {
+      try {
+        if (seen.indexOf(win) >= 0) break
+        seen.push(win)
+        win.postMessage(raw, "*")
+      } catch (err) {}
+      var next = null
+      try {
+        next = win.parent
+      } catch (err) {
+        break
+      }
+      if (!next || next === win) break
+      win = next
     }
   }
 
@@ -481,17 +495,31 @@
   }
 
   function emit(event, result) {
-    reply(event, result)
-    try {
-      var extra = JSON.stringify({
-        type: "agent-doc",
-        event: event,
-        requestId: event,
-        result: result || null,
-        error: null
-      })
-      window.top.postMessage(extra, "*")
-    } catch (err) {}
+    var payload = {
+      type: "agent-doc",
+      event: event,
+      requestId: event,
+      result: result || null,
+      error: null
+    }
+    var raw = JSON.stringify(payload)
+    var seen = []
+    var win = window
+    while (win) {
+      try {
+        if (seen.indexOf(win) >= 0) break
+        seen.push(win)
+        win.postMessage(raw, "*")
+      } catch (err) {}
+      var next = null
+      try {
+        next = win.parent
+      } catch (err) {
+        break
+      }
+      if (!next || next === win) break
+      win = next
+    }
   }
 
   function ghostState() {

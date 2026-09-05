@@ -2,6 +2,11 @@ export interface XHRMiddleware {
   (request: Request): Response | null | Promise<Response | null>;
 }
 
+export type SyncXHRMiddleware = (
+  url: string,
+  method: string,
+) => { status?: number; statusText?: string; body: string; contentType?: string } | null;
+
 /**
  * Creates an XMLHttpRequest proxy class that supports middleware
  * @param BaseXHR The original XMLHttpRequest class
@@ -13,6 +18,7 @@ export function createXHRProxy(
 ) {
   return class ProxyXMLHttpRequest extends BaseXHR {
     private static _middlewares: XHRMiddleware[] = [];
+    private static _syncMiddlewares: SyncXHRMiddleware[] = [];
 
     private _isMocked: boolean = false;
     private _requestMethod: string = "GET";
@@ -28,11 +34,17 @@ export function createXHRProxy(
       this._middlewares.push(middleware);
     }
 
+    /** Sync XHR (OnlyOffice getConfigJson) cannot await async middleware. */
+    static useSync(middleware: SyncXHRMiddleware) {
+      this._syncMiddlewares.push(middleware);
+    }
+
     /**
      * Clear all middleware
      */
     static clearMiddlewares() {
-      this._middlewares = [];
+      this._middlewares.length = 0;
+      this._syncMiddlewares.length = 0;
     }
 
     open(
@@ -70,9 +82,22 @@ export function createXHRProxy(
     send(body?: Document | XMLHttpRequestBodyInit | null): void {
       this._requestBody = body;
 
-      // OnlyOffice plugin bootstrap uses sync XHR (plugins.json / config.json).
-      // Async middleware would return empty responseText immediately.
+      // OnlyOffice plugin bootstrap uses sync XHR (getConfigJson).
+      // Async middleware would return empty responseText immediately, so serve
+      // known plugin paths synchronously instead of falling through to 404.
       if (!this._async) {
+        for (const mw of ProxyXMLHttpRequest._syncMiddlewares) {
+          try {
+            const mocked = mw(this._requestUrl, this._requestMethod);
+            if (mocked) {
+              this._isMocked = true;
+              this._applySyncMock(mocked);
+              return;
+            }
+          } catch (err) {
+            console.error("ProxyXMLHttpRequest sync middleware error:", err);
+          }
+        }
         super.send(body);
         return;
       }
@@ -90,6 +115,91 @@ export function createXHRProxy(
           // Fallback to native implementation on error
           super.send(body);
         });
+    }
+
+    private _applySyncMock(mocked: {
+      status?: number;
+      statusText?: string;
+      body: string;
+      contentType?: string;
+    }) {
+      const status = mocked.status ?? 200;
+      const statusText = mocked.statusText ?? "OK";
+      const body = mocked.body;
+      let responseData: any = body;
+      if (this.responseType === "json") {
+        try {
+          responseData = JSON.parse(body);
+        } catch {
+          responseData = null;
+        }
+      }
+
+      this.dispatchEvent(new ProgressEvent("loadstart"));
+      Object.defineProperty(this, "readyState", {
+        value: 2,
+        writable: false,
+        configurable: true,
+      });
+      this.dispatchEvent(new Event("readystatechange"));
+      Object.defineProperty(this, "readyState", {
+        value: 3,
+        writable: false,
+        configurable: true,
+      });
+      this.dispatchEvent(new Event("readystatechange"));
+
+      Object.defineProperty(this, "status", {
+        value: status,
+        writable: false,
+        configurable: true,
+      });
+      Object.defineProperty(this, "statusText", {
+        value: statusText,
+        writable: false,
+        configurable: true,
+      });
+      Object.defineProperty(this, "response", {
+        value: responseData,
+        writable: false,
+        configurable: true,
+      });
+      Object.defineProperty(this, "responseText", {
+        value: body,
+        writable: false,
+        configurable: true,
+      });
+      Object.defineProperty(this, "responseURL", {
+        value: this._requestUrl,
+        writable: false,
+        configurable: true,
+      });
+      Object.defineProperty(this, "getResponseHeader", {
+        value: (name: string) => {
+          if (name.toLowerCase() === "content-type") {
+            return mocked.contentType || "application/json";
+          }
+          return null;
+        },
+        writable: false,
+        configurable: true,
+      });
+
+      this.dispatchEvent(
+        new ProgressEvent("progress", {
+          lengthComputable: true,
+          loaded: body.length,
+          total: body.length,
+        }),
+      );
+      Object.defineProperty(this, "readyState", {
+        value: 4,
+        writable: false,
+        configurable: true,
+      });
+      this.dispatchEvent(new Event("readystatechange"));
+      this.dispatchEvent(new ProgressEvent("load"));
+      this.dispatchEvent(new ProgressEvent("loadend"));
     }
 
     private async _tryMiddlewares(): Promise<boolean> {

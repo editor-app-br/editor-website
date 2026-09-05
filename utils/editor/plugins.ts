@@ -74,7 +74,7 @@ export const AGENT_PLUGIN_MANIFEST = {
   name: "Agent",
   nameLocale: { en: "Agent", "pt-BR": "Agente" },
   guid: AGENT_PLUGIN_GUID,
-  version: "1.2.0",
+  version: "1.2.1",
   variations: [
     {
       description: "Document tools for the host Agent",
@@ -85,10 +85,12 @@ export const AGENT_PLUGIN_MANIFEST = {
       isVisual: false,
       isModal: false,
       isInsideMode: false,
-      // OnlyOffice 9 hides isSystem plugins from the start list (`visible && !isSystem`).
-      // type:background still autostarts a hidden iframe.
+      // OnlyOffice 9: isSystem → visible=false and the iframe never mounts.
+      // type:background → Background Plugins menu, off until the user toggles it
+      // (callCommand on a half-started frame crashes the editor).
+      // type:invisible maps to PluginType.Unvisible and autostarts hidden.
       isSystem: false,
-      type: "background",
+      type: "invisible",
       initDataType: "none",
       initData: "",
       isUpdateOleOnResize: false,

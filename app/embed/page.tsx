@@ -23,7 +23,13 @@ import {
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import { prefetchEditorAssets } from "@/utils/editor/warmup";
-import { AGENT_PLUGIN_GUID, getAgentPluginsData } from "@/utils/editor/plugins";
+import {
+  AGENT_PLUGIN_GUID,
+  AGENT_PLUGIN_MANIFEST,
+  getAgentPluginsData,
+  isAgentPluginConfigPath,
+  isPluginsJsonPath,
+} from "@/utils/editor/plugins";
 import {
   LEGAL_CONTACT,
   PUBLIC_ABOUT_URL,
@@ -257,6 +263,37 @@ export default function EmbedPage() {
       const NativeWorker = win.Worker;
 
       xhr.use((request: Request) => server.handleRequest(request));
+      xhr.useSync((url) => {
+        try {
+          const u = new URL(url, location.origin);
+          if (isPluginsJsonPath(u.pathname)) {
+            const state = pluginModeRef.current;
+            if (state === "none") {
+              return {
+                body: JSON.stringify({ url: "", pluginsData: [], autostart: [] }),
+                contentType: "application/json",
+              };
+            }
+            if (state === "agent") {
+              return {
+                body: JSON.stringify(getAgentPluginsData(location.origin)),
+                contentType: "application/json",
+              };
+            }
+            return null;
+          }
+          if (isAgentPluginConfigPath(u.pathname)) {
+            const baseUrl = `${location.origin}/office-plugins/agent/`;
+            return {
+              body: JSON.stringify({ ...AGENT_PLUGIN_MANIFEST, baseUrl }),
+              contentType: "application/json",
+            };
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      });
       fetchProxy.use((request: Request) => server.handleRequest(request));
 
       Object.assign(win, {
@@ -416,17 +453,32 @@ export default function EmbedPage() {
               return;
             }
             // Host marks the Agent ready on documentReady and immediately
-            // sends doc_*. Wait until the plugin can take commands.
+            // sends doc_*. Wait for the plugin's own ready ping — an empty
+            // iframe_asc.* is not enough (background/half-init crashes).
             const started = Date.now();
-            const finish = () => postToHost({ type: "documentReady" });
+            const finish = (ok: boolean) => {
+              if (!ok) {
+                postToHost({
+                  type: "error",
+                  message: "OnlyOffice agent plugin is not loaded.",
+                });
+                return;
+              }
+              postToHost({ type: "documentReady" });
+            };
             if (pluginCanReceive()) {
-              finish();
+              finish(true);
               return;
             }
             const tick = window.setInterval(() => {
-              if (pluginCanReceive() || Date.now() - started > 20_000) {
+              if (pluginCanReceive()) {
                 window.clearInterval(tick);
-                finish();
+                finish(true);
+                return;
+              }
+              if (Date.now() - started > 20_000) {
+                window.clearInterval(tick);
+                finish(false);
               }
             }, 200);
           },
@@ -519,10 +571,11 @@ export default function EmbedPage() {
         if (host?.onExternalPluginMessage) {
           host.onExternalPluginMessage(data);
           delivered = true;
+          continue;
         }
+        // Frame exists but Asc.plugin is not ready yet — keep retrying.
         try {
           plugin.contentWindow?.postMessage(data, "*");
-          delivered = true;
         } catch {
           /* cross-origin plugin frame */
         }
@@ -530,7 +583,7 @@ export default function EmbedPage() {
       return delivered;
     };
 
-    const pluginCanReceive = () => pluginReadyFromChild.current || findPluginFrames().length > 0;
+    const pluginCanReceive = () => pluginReadyFromChild.current;
 
     const deliverPluginCommandWhenReady = (data: Record<string, unknown>, requestId?: string) => {
       if (deliverPluginCommand(data)) return;
