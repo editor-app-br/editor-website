@@ -1,9 +1,14 @@
 import { converter } from "./x2t";
 import { MockSocket } from "./socket";
-import { User, Participant, AscSaveTypes, ServerOptions } from "./types";
+import { User, Participant, AscSaveTypes, AvsFileType, ServerOptions } from "./types";
 import { emptyDocx, emptyPdf, emptyPptx, emptyXlsx } from "./empty";
 import { getDocumentType, getFileExt } from "./utils";
 import { allPlugins, featuredPlugins, getAgentPluginsData, getPluginsData } from "./plugins";
+import {
+  isNativeOfficePersistExport,
+  isPdfDownloadAs,
+  nativeFormatFromExt,
+} from "./persistExport";
 
 function mergeBuffers(buffers: Uint8Array[]) {
   const totalLength = buffers.reduce((acc, buffer) => acc + buffer.length, 0);
@@ -388,116 +393,145 @@ export class EditorServer {
   async handleRequest(req: Request) {
     const u = new URL(req.url);
 
-    const { id: key, send } = this;
-    // console.log("[msg] server: ", u, key);
+    const { send } = this;
 
-    if (u.pathname.endsWith("/downloadas/" + key)) {
-      const cmd = JSON.parse(u.searchParams.get("cmd") || "{}");
-      const buffer = await req.arrayBuffer();
+    if (u.pathname.includes("/downloadas/")) {
+      try {
+        const cmd = JSON.parse(u.searchParams.get("cmd") || "{}") as {
+          title?: string;
+          outputformat?: number;
+          savetype?: number | string;
+          format?: string;
+        };
+        const buffer = await req.arrayBuffer();
 
-      console.log("downloadAs -> ", cmd, buffer);
-
-      const fileTo = "doc." + cmd.title.split(".").pop();
-      let formatTo = cmd.outputformat;
-      if (!formatTo && fileTo.endsWith(".pdf")) {
-        formatTo = 513;
-      }
-
-      const download = async () => {
-        const input = mergeBuffers(this.downloadParts);
-        let fileFrom = "from.bin";
-        if (cmd.format == "pdf") {
-          fileFrom = "from.pdf";
-        }
-
-        let { output } = await converter.convert({
-          data: input.buffer,
-          fileFrom: fileFrom,
-          fileTo: fileTo,
-          formatTo: formatTo,
-          media: Object.fromEntries(this.fsMap),
-        });
-        if (!output && cmd.format == "pdf") {
-          output = input;
-        }
-        if (!output) {
-          console.error("Conversion failed");
-          // TODO: error message
-          return { status: "error" };
-        }
-        const blob = new Blob([new Uint8Array(output)]);
         const title = cmd.title || this.title || `document.${this.fileType}`;
-        if (this.options.persistFile) {
-          try {
-            await this.options.persistFile(blob, title);
-          } catch (persistErr) {
-            console.error(persistErr);
-          }
-          return { status: "ok" };
+        const titleExt = (title.split(".").pop() || this.fileType || "docx").toLowerCase();
+        const nativePersist = isNativeOfficePersistExport(this.fileType, cmd);
+        const fileTo = nativePersist ? `doc.${this.fileType}` : `doc.${titleExt}`;
+        let formatTo = cmd.outputformat ?? nativeFormatFromExt(nativePersist ? this.fileType : titleExt);
+        if (!formatTo && fileTo.endsWith(".pdf")) {
+          formatTo = AvsFileType.AVS_FILE_CROSSPLATFORM_PDF;
         }
-        if (this.options.onExportedFile) {
+
+        const media = Object.fromEntries(
+          [...this.fsMap.entries()].filter(([name]) => name.startsWith("media/")),
+        );
+
+        const download = async (parts: Uint8Array[]) => {
           try {
-            await this.options.onExportedFile(blob, title);
-          } catch (exportErr) {
-            console.error(exportErr);
+            if (!nativePersist && isPdfDownloadAs(cmd)) {
+              return { status: "ok" };
+            }
+
+            const input = mergeBuffers(parts);
+            let fileFrom = "from.bin";
+            if (cmd.format == "pdf") {
+              fileFrom = "from.pdf";
+            }
+
+            const { output } = await converter.convert({
+              data: input.buffer.slice(0),
+              fileFrom,
+              fileTo,
+              formatTo,
+              media,
+            });
+            if (!output) {
+              console.error("Conversion failed");
+              // Host persist: never show OnlyOffice "Baixar como" for a failed WASM save.
+              return nativePersist && this.options.persistFile ? { status: "ok" } : { status: "error" };
+            }
+            const blob = new Blob([new Uint8Array(output)]);
+            if (nativePersist && this.options.persistFile) {
+              try {
+                await this.options.persistFile(blob, title);
+              } catch (persistErr) {
+                console.error(persistErr);
+              }
+              return { status: "ok" };
+            }
+            if (this.options.onExportedFile) {
+              try {
+                await this.options.onExportedFile(blob, title);
+              } catch (exportErr) {
+                console.error(exportErr);
+              }
+              return { status: "ok" };
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = title;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            return { status: "ok" };
+          } catch (err) {
+            console.error(err);
+            return nativePersist && this.options.persistFile ? { status: "ok" } : { status: "error" };
+          } finally {
+            if (nativePersist) this.options.onExportFinished?.();
           }
-          return { status: "ok" };
+        };
+
+        let result = { status: "ok" };
+        const saveType = Number(cmd.savetype);
+        const kind = Number.isFinite(saveType) ? saveType : AscSaveTypes.CompleteAll;
+        const skipPdfExport = !nativePersist && isPdfDownloadAs(cmd);
+        if (skipPdfExport) {
+          if (kind === AscSaveTypes.Complete || kind === AscSaveTypes.CompleteAll) {
+            result = { status: "ok" };
+          }
+        } else {
+          switch (kind) {
+            case AscSaveTypes.PartStart:
+              this.downloadId = "_" + Math.round(Math.random() * 1000);
+              this.downloadParts = [new Uint8Array(buffer)];
+              break;
+            case AscSaveTypes.Part:
+              this.downloadParts.push(new Uint8Array(buffer));
+              break;
+            case AscSaveTypes.Complete: {
+              const parts = [...this.downloadParts, new Uint8Array(buffer)];
+              this.downloadParts = [];
+              result = await download(parts);
+              break;
+            }
+            case AscSaveTypes.CompleteAll:
+            default:
+              result = await download([new Uint8Array(buffer)]);
+              break;
+          }
         }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = title;
-        a.click();
-        URL.revokeObjectURL(url);
 
-        return { status: "ok" };
-      };
+        setTimeout(() => {
+          send({
+            type: "documentOpen",
+            data: {
+              type: "save",
+              status: result.status,
+              data: "data:,",
+              filetype: this.fileType || "docx",
+            },
+          });
+        }, 100);
 
-      let result = {
-        status: "ok",
-      };
-
-      switch (cmd.savetype) {
-        case AscSaveTypes.PartStart:
-          this.downloadId = "_" + Math.round(Math.random() * 1000);
-          this.downloadParts = [new Uint8Array(buffer)];
-          break;
-        case AscSaveTypes.Part:
-          this.downloadParts.push(new Uint8Array(buffer));
-          break;
-        case AscSaveTypes.Complete:
-          this.downloadParts.push(new Uint8Array(buffer));
-          result = await download();
-          this.downloadParts = [];
-          this.options.onExportFinished?.();
-          break;
-        case AscSaveTypes.CompleteAll:
-          this.downloadId = "_" + Math.round(Math.random() * 1000);
-          this.downloadParts = [new Uint8Array(buffer)];
-          result = await download();
-          this.downloadParts = [];
-          this.options.onExportFinished?.();
-          break;
-      }
-
-      setTimeout(() => {
-        send({
-          type: "documentOpen",
-          data: {
-            type: "save",
-            // status: "ok",
-            status: result.status,
-            data: "data:,",
-            filetype: "pptx",
-          },
+        return Response.json({
+          status: result.status,
+          type: "save",
+          data: this.downloadId,
         });
-      }, 100);
-
-      return Response.json({
-        status: result.status,
-        type: "save",
-        data: this.downloadId,
-      });
+      } catch (err) {
+        console.error(err);
+        // A thrown handler falls through to native fetch (404) and OnlyOffice
+        // shows "Use a opção Baixar como". Always ack the mocked save.
+        return Response.json({
+          status: this.options.persistFile ? "ok" : "error",
+          type: "save",
+          data: this.downloadId,
+        });
+      }
     }
 
     if (u.pathname.endsWith("/upload/" + key)) {
