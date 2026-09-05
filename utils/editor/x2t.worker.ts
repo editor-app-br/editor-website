@@ -3,10 +3,10 @@
 import { AvsFileType, X2tConvertParams, X2tConvertResult } from "./types";
 
 /**
- * X2T Converter Web Worker
+ * X2T Converter Web Worker (TypeScript source).
  *
- * This worker handles CPU-intensive document conversion operations
- * off the main thread to prevent UI blocking.
+ * Production must use /x2t-worker.js — Next export ships this file as
+ * /_next/static/media/x2t.worker.*.ts and Chrome will not run it.
  */
 
 /* eslint-disable no-restricted-globals */

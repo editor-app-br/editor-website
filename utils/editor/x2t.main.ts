@@ -29,17 +29,37 @@ export class X2tConverter {
         reject(new Error("x2t Module did not load"));
         return;
       }
-      // Emscripten may already have finished before we attach the hook.
-      await new Promise<void>((res) => {
-        if (this.x2t.calledRun) {
+      // Emscripten may finish before or while we attach the hook.
+      await new Promise<void>((res, rej) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
           res();
+        };
+        if (this.x2t.calledRun) {
+          done();
           return;
         }
         const previous = this.x2t.onRuntimeInitialized;
         this.x2t.onRuntimeInitialized = () => {
           if (typeof previous === "function") previous();
-          res();
+          done();
         };
+        if (this.x2t.calledRun) {
+          done();
+          return;
+        }
+        const started = Date.now();
+        const timer = window.setInterval(() => {
+          if (this.x2t.calledRun) {
+            window.clearInterval(timer);
+            done();
+          } else if (Date.now() - started > 30_000) {
+            window.clearInterval(timer);
+            rej(new Error("x2t runtime init timed out"));
+          }
+        }, 50);
       });
 
       try {

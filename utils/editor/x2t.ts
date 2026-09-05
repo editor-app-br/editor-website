@@ -1,16 +1,15 @@
 /**
- * X2T converter. Prefer a Web Worker; fall back to the main thread.
+ * X2T converter. Prefer /x2t-worker.js; fall back to the main thread.
  *
- * Next.js static export currently copies `x2t.worker.ts` to
- * `/_next/static/media/x2t.worker.*.ts` (MIME text/vnd.trolltech.linguist +
- * nosniff). Chrome refuses to start that Worker, convert() hangs, embed never
- * sends documentReady, and autosave shows "Ocorreu um erro / Baixar como".
+ * Next static export copies `x2t.worker.ts` as media (linguist MIME + nosniff).
+ * Chrome refuses that Worker. Production must load a real JS worker.
  */
 
 import { converter as mainThreadConverter } from "./x2t.main";
 import { X2tConvertParams, X2tConvertResult } from "./types";
 
-const WORKER_CONVERT_MS = 20_000;
+const WORKER_URL = "/x2t-worker.js";
+const WORKER_CONVERT_MS = 45_000;
 
 interface PendingMessage {
   resolve: (value: X2tConvertResult) => void;
@@ -28,10 +27,6 @@ function fileExt(name: string) {
   const base = name.split("/").pop() || name;
   const dot = base.lastIndexOf(".");
   return dot >= 0 ? base.slice(dot + 1) : base;
-}
-
-function workerUrlIsCompiled(url: URL): boolean {
-  return /\.js(\?|$)/.test(url.pathname);
 }
 
 async function convertOnMain(params: X2tConvertParams): Promise<X2tConvertResult> {
@@ -112,17 +107,7 @@ export class X2tConverter {
 
     this.initPromise = new Promise<void>((resolve) => {
       try {
-        const workerUrl = new URL("./x2t.worker.ts", import.meta.url);
-        if (!workerUrlIsCompiled(workerUrl)) {
-          console.warn(
-            "[X2tConverter] Worker asset is not JS (%s); using main-thread x2t",
-            workerUrl.pathname,
-          );
-          this.useMain = true;
-          resolve();
-          return;
-        }
-        this.worker = new Worker(workerUrl);
+        this.worker = new Worker(WORKER_URL);
         this.worker.onmessage = this.handleWorkerMessage;
         this.worker.onerror = this.handleWorkerError;
         resolve();
