@@ -76,6 +76,13 @@ pnpm build
 
 Abra [http://localhost:3000](http://localhost:3000) no seu navegador.
 
+Para permitir que um sistema parceiro controle `/embed` via `postMessage`:
+
+- **Produção (Helm):** `embedPartner.hosts` e `embedPartner.url` no chart de deploy. O pod serve `/embed-partner.json`.
+- **Local:** copie `.env.example` para `.env.local` (`NEXT_PUBLIC_EMBED_PARTNER_HOSTS` / `NEXT_PUBLIC_EMBED_PARTNER_URL`), ou edite `public/embed-partner.json`.
+
+Sem isso, só este site, localhost e hosts desktop (Tauri) podem dirigir o embed.
+
 ---
 
 ## 🤝 Como Contribuir e Enviar Pull Requests

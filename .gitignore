@@ -51,3 +51,4 @@ next-env.d.ts
 .env
 .edgeone/*
 .tef_dist/*
+.idea

@@ -210,8 +210,11 @@ export type OfficeTheme =
   | "theme-night"
   | "theme-contrast-dark";
 
-export type PluginMode = "featured" | "all" | "none";
+export type PluginMode = "featured" | "all" | "none" | "agent";
 
 export interface ServerOptions {
   getState?: () => { plugins: PluginMode };
+  persistFile?: (blob: Blob, fileName: string) => Promise<void>;
+  onExportedFile?: (blob: Blob, fileName: string) => Promise<void>;
+  onExportFinished?: () => void;
 }

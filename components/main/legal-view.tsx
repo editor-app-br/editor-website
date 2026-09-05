@@ -80,6 +80,9 @@ export function LegalView() {
           Integrações externas usam <code>&lt;iframe&gt;</code> +{" "}
           <code>postMessage</code>. O sistema host troca apenas bytes de
           documentos; documentos são processados localmente no navegador.
+          O host pode pré-carregar <code>/embed?warmup=1</code> para o
+          navegador cachear JS/WASM neste origin (não no binário do host).
+          HTML da aplicação não é cacheado.
         </p>
       </section>
 

@@ -66,10 +66,22 @@ export function getPluginConfigUrl(name: string) {
   return `${pluginsBase}/${name}/config.json`;
 }
 
+export const AGENT_PLUGIN_GUID = "asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}";
+export const AGENT_PLUGIN_PATH = "/office-plugins/agent/config.json";
+
 export function getPluginsData(list: string[]) {
   return {
     url: "",
     pluginsData: list.map(getPluginConfigUrl),
     autostart: [],
+  };
+}
+
+export function getAgentPluginsData(origin = "") {
+  const base = origin.replace(/\/$/, "");
+  return {
+    url: "",
+    pluginsData: [`${base}${AGENT_PLUGIN_PATH}`],
+    autostart: [AGENT_PLUGIN_GUID],
   };
 }

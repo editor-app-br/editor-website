@@ -117,7 +117,7 @@ export default async function RootLayout({
         <script>{`(${preload.toString()})()`}</script>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if("serviceWorker"in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(x){x.unregister()})});if(window.caches)caches.keys().then(function(k){k.forEach(function(n){caches.delete(n)})})}`,
+            __html: `if("serviceWorker"in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(x){var u=(x.active&&x.active.scriptURL)||"";if(u.indexOf("document_editor_service_worker")>=0)return;x.unregister()})});if(window.caches)caches.keys().then(function(k){k.forEach(function(n){if(n.indexOf("editor-static-")===0||n.indexOf("document_editor_static_")===0)return;caches.delete(n)})})}`,
           }}
         />
         <script

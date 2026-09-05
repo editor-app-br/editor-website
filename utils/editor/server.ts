@@ -3,7 +3,7 @@ import { MockSocket } from "./socket";
 import { User, Participant, AscSaveTypes, ServerOptions } from "./types";
 import { emptyDocx, emptyPdf, emptyPptx, emptyXlsx } from "./empty";
 import { getDocumentType, getFileExt } from "./utils";
-import { allPlugins, featuredPlugins, getPluginsData } from "./plugins";
+import { allPlugins, featuredPlugins, getAgentPluginsData, getPluginsData } from "./plugins";
 
 function mergeBuffers(buffers: Uint8Array[]) {
   const totalLength = buffers.reduce((acc, buffer) => acc + buffer.length, 0);
@@ -424,10 +424,27 @@ export class EditorServer {
           return { status: "error" };
         }
         const blob = new Blob([new Uint8Array(output)]);
+        const title = cmd.title || this.title || `document.${this.fileType}`;
+        if (this.options.persistFile) {
+          try {
+            await this.options.persistFile(blob, title);
+          } catch (persistErr) {
+            console.error(persistErr);
+          }
+          return { status: "ok" };
+        }
+        if (this.options.onExportedFile) {
+          try {
+            await this.options.onExportedFile(blob, title);
+          } catch (exportErr) {
+            console.error(exportErr);
+          }
+          return { status: "ok" };
+        }
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = cmd.title || "test.docx";
+        a.download = title;
         a.click();
         URL.revokeObjectURL(url);
 
@@ -450,12 +467,14 @@ export class EditorServer {
           this.downloadParts.push(new Uint8Array(buffer));
           result = await download();
           this.downloadParts = [];
+          this.options.onExportFinished?.();
           break;
         case AscSaveTypes.CompleteAll:
           this.downloadId = "_" + Math.round(Math.random() * 1000);
           this.downloadParts = [new Uint8Array(buffer)];
           result = await download();
           this.downloadParts = [];
+          this.options.onExportFinished?.();
           break;
       }
 
@@ -492,6 +511,9 @@ export class EditorServer {
       const state = this.options.getState?.();
       if (state?.plugins == "none") {
         return Response.json({ url: "", pluginsData: [], autostart: [] });
+      }
+      if (state?.plugins == "agent") {
+        return Response.json(getAgentPluginsData(location.origin));
       }
       if (state?.plugins == "all") {
         return Response.json(getPluginsData(allPlugins));
