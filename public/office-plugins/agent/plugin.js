@@ -643,19 +643,27 @@
     return true
   }
 
-  window.Asc.plugin.init = function () {
-    window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
-    window.Asc.plugin.onExternalPluginMessage = handle
-    window.Asc.plugin.event_onKeyDown = onEditorKey
-    try {
-      window.Asc.plugin.attachEvent("onKeyDown", onEditorKey)
-      window.Asc.plugin.attachEvent("onTargetPositionChanged", function () {
-        if (contextTimer) window.clearTimeout(contextTimer)
-        contextTimer = window.setTimeout(requestCompletion, 700)
-      })
-    } catch (err) {}
-    reply("ready", { ok: true })
+  function install() {
+    if (!window.Asc || !window.Asc.plugin) {
+      install.tries = (install.tries || 0) + 1
+      if (install.tries > 40) return
+      window.setTimeout(install, 100)
+      return
+    }
+    window.Asc.plugin.init = function () {
+      window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
+      window.Asc.plugin.onExternalPluginMessage = handle
+      window.Asc.plugin.event_onKeyDown = onEditorKey
+      try {
+        window.Asc.plugin.attachEvent("onKeyDown", onEditorKey)
+        window.Asc.plugin.attachEvent("onTargetPositionChanged", function () {
+          if (contextTimer) window.clearTimeout(contextTimer)
+          contextTimer = window.setTimeout(requestCompletion, 700)
+        })
+      } catch (err) {}
+      reply("ready", { ok: true })
+    }
+    window.Asc.plugin.button = function () {}
   }
-
-  window.Asc.plugin.button = function () {}
+  install()
 })()

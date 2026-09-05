@@ -10,13 +10,19 @@ const HIDE_PREVIEW_CHROME_CSS = `
   }
 `;
 
-/** Hide dummy Me avatar only. Keep EDITOR GRATUITO logo and File → About (AGPL). */
+/** Hide dummy Me avatar. File → About keeps AGPL. No floating/status brand marks. */
 const HIDE_EMBED_BRAND_CSS = `
   .slot-btn-user-name,
   .btn-current-user,
   .color-user-name,
   .box-cousers,
   .btn-users {
+    display: none !important;
+  }
+  #header-logo,
+  .brand-logo,
+  .extra.left .logo,
+  .asc-logo-box {
     display: none !important;
   }
 `;

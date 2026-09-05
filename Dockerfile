@@ -63,6 +63,9 @@ COPY types ./types
 COPY utils ./utils
 COPY components.json eslint.config.mjs next.config.ts postcss.config.mjs svgo.config.js tsconfig.json ./
 
+# Bake the live OnlyOffice asset prefix so the Agent plugin can find plugins.js.
+RUN printf '{"appRoot":"/v%s-%s"}\n' "$DS_VERSION" "$HASH" > public/app-root.json
+
 # Run the Next.js static export build.
 RUN pnpm build
 

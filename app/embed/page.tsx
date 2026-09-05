@@ -23,7 +23,6 @@ import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import { prefetchEditorAssets } from "@/utils/editor/warmup";
 import { AGENT_PLUGIN_GUID, getAgentPluginsData } from "@/utils/editor/plugins";
-import { EmbedLegal } from "@/components/embed/embed-legal";
 import {
   LEGAL_CONTACT,
   PUBLIC_ABOUT_URL,
@@ -67,9 +66,8 @@ export default function EmbedPage() {
   const defaultLanguage = useResolvedLanguage();
   const hasHydrated = useHasHydrated();
   const [loading, setLoading] = useState(true);
-  const [appRoot, setAppRoot] = useState<string>("/v9.3.1-1");
+  const [appRoot, setAppRoot] = useState<string>(() => getAppRoot());
   const [warmupLabel, setWarmupLabel] = useState<string | null>(null);
-  const [showLegal, setShowLegal] = useState(true);
   const isDirty = useRef(false);
   const editorRef = useRef<DocEditor | null>(null);
   const serverRef = useRef<EditorServer | null>(null);
@@ -342,9 +340,7 @@ export default function EmbedPage() {
                   logoDark: `${location.origin}${PUBLIC_CUBE_LOGO}`,
                 },
             logo: {
-              visible: !isPreview,
-              image: `${location.origin}${PUBLIC_CUBE_LOGO}`,
-              imageDark: `${location.origin}${PUBLIC_CUBE_LOGO}`,
+              visible: false,
               url: PUBLIC_ABOUT_URL,
             },
           },
@@ -462,7 +458,6 @@ export default function EmbedPage() {
           openingRef.current = true;
           pluginModeRef.current = data.plugins === "none" || data.variant === "preview" ? "none" : "agent";
           hideChromeRef.current = data.hideChrome === true || data.variant === "preview";
-          setShowLegal(!hideChromeRef.current);
           fileMetaRef.current = { fileName: data.fileName, fileType: String(data.fileType) };
           const blob = new Blob([data.bytes]);
           const file = new File([blob], data.fileName, { type: "application/octet-stream" });
@@ -567,7 +562,6 @@ export default function EmbedPage() {
       <div id="placeholder" className="w-full h-full">
         <iframe className="w-0 h-0 hidden" src={appRoot + PRELOAD_HTML} />
       </div>
-      <EmbedLegal visible={showLegal && !loading} />
     </div>
   );
 }

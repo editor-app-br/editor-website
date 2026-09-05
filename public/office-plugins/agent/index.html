@@ -5,15 +5,25 @@
     <title>Agent</title>
     <script>
       (function () {
-        var roots = ["/v9.3.1-1", "/v9.3.0.24-1"];
-        var script = document.createElement("script");
-        script.src = roots[0] + "/sdkjs-plugins/v1/plugins.js";
-        script.onerror = function () {
-          var fallback = document.createElement("script");
-          fallback.src = roots[1] + "/sdkjs-plugins/v1/plugins.js";
-          document.head.appendChild(fallback);
-        };
-        document.head.appendChild(script);
+        var fallbacks = ["/v9.3.1-2", "/v9.3.1-1", "/v9.3.0.24-1"];
+        function load(src, rest) {
+          var script = document.createElement("script");
+          script.src = src;
+          script.onerror = function () {
+            if (rest.length) load(rest[0] + "/sdkjs-plugins/v1/plugins.js", rest.slice(1));
+          };
+          document.head.appendChild(script);
+        }
+        fetch("/app-root.json")
+          .then(function (res) { return res.ok ? res.json() : {}; })
+          .then(function (cfg) {
+            var root = cfg && cfg.appRoot ? String(cfg.appRoot) : fallbacks[0];
+            var rest = fallbacks.filter(function (item) { return item !== root; });
+            load(root + "/sdkjs-plugins/v1/plugins.js", rest);
+          })
+          .catch(function () {
+            load(fallbacks[0] + "/sdkjs-plugins/v1/plugins.js", fallbacks.slice(1));
+          });
       })();
     </script>
     <script src="plugin.js"></script>
