@@ -167,7 +167,6 @@ export default function EmbedPage() {
     const isWarmup = searchParams.get("warmup") === "1";
 
     if (isWarmup) {
-      setShowLegal(false);
       setWarmupLabel("Preparando cache do editor…");
       void prefetchEditorAssets(resolvedAppRoot, (done, total) => {
         setWarmupLabel(`Preparando cache do editor… ${done}/${total}`);
