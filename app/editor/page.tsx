@@ -7,6 +7,7 @@ import {
   APP_ROOT,
   getDocumentType,
   PRELOAD_HTML,
+  toOnlyOfficeLang,
 } from "@/utils/editor/utils";
 import io, { MockSocket } from "@/utils/editor/socket";
 import { createFetchProxy } from "@/utils/editor/fetch";
@@ -124,7 +125,7 @@ export default function Page() {
         },
         documentType: documentType,
         editorConfig: {
-          lang: lang,
+          lang: toOnlyOfficeLang(lang),
           coEditing: {
             mode: "fast",
             change: false,

@@ -90,3 +90,13 @@ export function getAppRoot(versionParam?: string | null): string {
 export const APP_ROOT = getAppRoot();
 export const PRELOAD_HTML = "/web-apps/apps/api/documents/preload.html";
 export const API_JS = "/web-apps/apps/api/documents/api.js";
+
+/**
+ * OnlyOffice locale files are `pt.json` / `en.json`, not `pt-BR.json`.
+ * Browser and workspace send BCP-47 tags; those 404 and the editor shows
+ * "The interface language is not loaded".
+ */
+export function toOnlyOfficeLang(lang?: string | null): string {
+  const primary = (lang || "pt").trim().split(/[-_]/)[0]?.toLowerCase();
+  return primary || "pt";
+}

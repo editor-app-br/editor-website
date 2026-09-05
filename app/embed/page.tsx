@@ -7,6 +7,7 @@ import {
   getAppRoot,
   getDocumentType,
   PRELOAD_HTML,
+  toOnlyOfficeLang,
 } from "@/utils/editor/utils";
 import io, { MockSocket } from "@/utils/editor/socket";
 import { createFetchProxy } from "@/utils/editor/fetch";
@@ -339,7 +340,7 @@ export default function EmbedPage() {
         documentType,
         editorConfig: {
           mode: canEdit ? "edit" : "view",
-          lang: options.lang || defaultLanguage,
+          lang: toOnlyOfficeLang(options.lang || defaultLanguage),
           coEditing: {
             mode: "fast",
             change: false,
@@ -516,7 +517,7 @@ export default function EmbedPage() {
           loadEditorScript(() => {
             createEditorInstance({
               editing: data.editing,
-              lang: data.lang || "pt-BR",
+              lang: toOnlyOfficeLang(data.lang || "pt"),
               uiTheme,
               fileName: data.fileName,
               hideChrome: hideChromeRef.current,

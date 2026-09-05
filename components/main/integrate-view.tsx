@@ -181,7 +181,7 @@ window.addEventListener("message", (event) => {
         fileName: "contrato.docx",
         fileType: "docx",
         editing: true,
-        lang: "pt-BR",
+        lang: "pt",
         theme: "dark",
         plugins: "agent",
         bytes: fileBytes,
