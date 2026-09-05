@@ -29,10 +29,94 @@
     }
   }
 
+  function setScope(values) {
+    if (!window.Asc) window.Asc = {}
+    // Never replace Asc.scope: callCommand does JSON.stringify(window.Asc.scope).
+    if (!window.Asc.scope || typeof window.Asc.scope !== "object") window.Asc.scope = {}
+    var scope = window.Asc.scope
+    var key
+    for (key in scope) {
+      if (Object.prototype.hasOwnProperty.call(scope, key) && key !== "prototype") delete scope[key]
+    }
+    if (!values || typeof values !== "object") return scope
+    for (key in values) {
+      if (!Object.prototype.hasOwnProperty.call(values, key)) continue
+      if (key === "prototype") continue
+      var value = values[key]
+      if (value === undefined) continue
+      if (typeof value === "function") continue
+      scope[key] = value
+    }
+    return scope
+  }
+
   function callDoc(fn, done) {
-    window.Asc.plugin.callCommand(fn, false, true, function (value) {
-      done(value)
-    })
+    var finished = false
+    var timer = window.setTimeout(function () {
+      if (finished) return
+      finished = true
+      done(undefined, "OnlyOffice callCommand timeout.")
+    }, 10000)
+    function finish(value, error) {
+      if (finished) return
+      finished = true
+      window.clearTimeout(timer)
+      done(value, error)
+    }
+    try {
+      if (!window.Asc || !window.Asc.plugin) {
+        finish(undefined, "Asc.plugin missing.")
+        return
+      }
+      if (typeof window.Asc.plugin.callCommand !== "function") {
+        finish(undefined, "callCommand unavailable.")
+        return
+      }
+      if (!window.Asc.plugin.info) window.Asc.plugin.info = {}
+      // Sub-window frames refuse callCommand/executeMethod ("does not allow in window frame").
+      try {
+        delete window.Asc.plugin.windowID
+      } catch (err) {
+        window.Asc.plugin.windowID = undefined
+      }
+      window.Asc.plugin.callCommand(fn, false, true, function (value) {
+        finish(value)
+      })
+    } catch (err) {
+      finish(undefined, err && err.message ? err.message : String(err))
+    }
+  }
+
+  function runMethod(name, params, done) {
+    var finished = false
+    var timer = window.setTimeout(function () {
+      if (finished) return
+      finished = true
+      done(undefined, "OnlyOffice executeMethod timeout: " + name)
+    }, 10000)
+    function finish(value, error) {
+      if (finished) return
+      finished = true
+      window.clearTimeout(timer)
+      done(value, error)
+    }
+    try {
+      if (!window.Asc || !window.Asc.plugin || typeof window.Asc.plugin.executeMethod !== "function") {
+        finish(undefined, "executeMethod unavailable.")
+        return
+      }
+      if (!window.Asc.plugin.info) window.Asc.plugin.info = {}
+      try {
+        delete window.Asc.plugin.windowID
+      } catch (err) {
+        window.Asc.plugin.windowID = undefined
+      }
+      window.Asc.plugin.executeMethod(name, params || [], function (value) {
+        finish(value)
+      })
+    } catch (err) {
+      finish(undefined, err && err.message ? err.message : String(err))
+    }
   }
 
   function handle(data) {
@@ -47,7 +131,7 @@
 
     try {
       if (type === "get_text") {
-        window.Asc.scope = {}
+        setScope({})
         callDoc(function () {
           function tableText(table) {
             if (!table || typeof table.GetRow !== "function") return ""
@@ -113,8 +197,9 @@
             return range && typeof range.GetValue === "function" ? range.GetValue() : ""
           }
           return ""
-        }, function (text) {
-          reply(requestId, { text: text == null ? "" : text })
+        }, function (text, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { text: text == null ? "" : text })
         })
         return
       }
@@ -140,28 +225,61 @@
             })
           }
           return items
-        }, function (items) {
-          reply(requestId, { outline: items || [] })
+        }, function (items, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { outline: items || [] })
         })
         return
       }
 
       if (type === "get_selection") {
-        window.Asc.plugin.executeMethod("GetSelectedText", [{ Numbering: false }], function (text) {
-          reply(requestId, { text: text || "" })
+        runMethod("GetSelectedText", [{ Numbering: false }], function (text, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { text: text || "" })
         })
         return
       }
 
       if (type === "insert_text" || type === "type") {
         var insert = String(payload.text || "")
-        window.Asc.scope = Object.assign({ text: insert, kind: type }, payload)
-        if (type === "type" && !payload.font && !payload.size && payload.bold == null) {
-          window.Asc.plugin.executeMethod("InputText", [{ text: insert }], function () {
-            reply(requestId, { inserted: insert.length })
+        var needsFormat = !!(
+          payload.font ||
+          payload.size ||
+          payload.bold != null ||
+          payload.italic != null ||
+          payload.underline != null ||
+          payload.strike != null ||
+          payload.color ||
+          payload.highlight ||
+          payload.align ||
+          payload.style ||
+          payload.list ||
+          payload.break
+        )
+        // Plain text: PasteText (string arg). Wrong InputText([{text}]) never completes.
+        if (!needsFormat) {
+          runMethod("PasteText", [insert], function (_value, error) {
+            if (error) reply(requestId, null, error)
+            else reply(requestId, { inserted: insert.length })
           })
           return
         }
+        setScope({
+          text: insert,
+          kind: type,
+          bold: payload.bold,
+          italic: payload.italic,
+          underline: payload.underline,
+          strike: payload.strike,
+          font: payload.font,
+          size: payload.size,
+          color: payload.color,
+          highlight: payload.highlight,
+          align: payload.align,
+          style: payload.style,
+          list: payload.list,
+          break: payload.break
+        })
         callDoc(function () {
           var s = Asc.scope
           if (typeof Api.GetPresentation === "function" && typeof Api.GetDocument !== "function") {
@@ -215,21 +333,23 @@
           }
           if (doc.InsertContent) doc.InsertContent(paras)
           return true
-        }, function (ok) {
-          reply(requestId, { inserted: insert.length, ok: ok !== false })
+        }, function (ok, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { inserted: insert.length, ok: ok !== false })
         })
         return
       }
 
       if (type === "replace_selection") {
-        window.Asc.plugin.executeMethod("InputText", [{ text: String(payload.text || "") }], function () {
-          reply(requestId, { replaced: true })
+        runMethod("PasteText", [String(payload.text || "")], function (_value, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { replaced: true })
         })
         return
       }
 
       if (type === "format") {
-        window.Asc.scope = payload
+        setScope(payload)
         callDoc(function () {
           var s = Asc.scope
           var doc = Api.GetDocument()
@@ -267,14 +387,15 @@
             }
           }
           return true
-        }, function (ok) {
-          reply(requestId, { formatted: ok !== false })
+        }, function (ok, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { formatted: ok !== false })
         })
         return
       }
 
       if (type === "table") {
-        window.Asc.scope = payload
+        setScope(payload)
         callDoc(function () {
           var s = Asc.scope
           var data = s.data || []
@@ -303,14 +424,15 @@
           }
           Api.GetDocument().InsertContent([table])
           return { rows: rows, cols: cols }
-        }, function (info) {
-          reply(requestId, info || { ok: true })
+        }, function (info, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, info || { ok: true })
         })
         return
       }
 
       if (type === "layout") {
-        window.Asc.scope = payload
+        setScope(payload)
         callDoc(function () {
           var s = Asc.scope
           var doc = Api.GetDocument()
@@ -349,17 +471,19 @@
             doc.InsertContent([para])
           }
           return true
-        }, function (ok) {
-          reply(requestId, { layout: ok !== false })
+        }, function (ok, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { layout: ok !== false })
         })
         return
       }
 
       if (type === "goto" || type === "select") {
-        window.Asc.scope = Object.assign({ kind: type }, payload)
+        setScope(Object.assign({ kind: type }, payload))
         if (payload.target === "all" && type === "select") {
-          window.Asc.plugin.executeMethod("SelectAll", [], function () {
-            reply(requestId, { selected: "all" })
+          runMethod("SelectAll", [], function (_value, error) {
+            if (error) reply(requestId, null, error)
+            else reply(requestId, { selected: "all" })
           })
           return
         }
@@ -385,15 +509,17 @@
           if (!target) return false
           if (target.Select) target.Select()
           return { index: Number(index) }
-        }, function (info) {
-          reply(requestId, info || { ok: true })
+        }, function (info, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, info || { ok: true })
         })
         return
       }
 
       if (type === "delete") {
-        window.Asc.plugin.executeMethod("InputText", [{ text: "" }], function () {
-          reply(requestId, { deleted: true })
+        runMethod("InputText", ["", ""], function (_value, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { deleted: true })
         })
         return
       }
@@ -405,24 +531,25 @@
           return
         }
         if (payload.all === true) {
-          window.Asc.plugin.executeMethod(
+          runMethod(
             "SearchAndReplace",
             [{
               searchString: find,
               replaceString: String(payload.replace || ""),
               matchCase: payload.match_case === true
             }],
-            function () {
-              reply(requestId, { replaced: true, find: find, all: true })
+            function (_value, error) {
+              if (error) reply(requestId, null, error)
+              else reply(requestId, { replaced: true, find: find, all: true })
             }
           )
           return
         }
-        window.Asc.scope = {
+        setScope({
           find: find,
           replace: String(payload.replace || ""),
           match_case: payload.match_case === true
-        }
+        })
         callDoc(function () {
           var s = Asc.scope
           var doc = Api.GetDocument()
@@ -435,14 +562,15 @@
           var para = doc.GetCurrentParagraph ? doc.GetCurrentParagraph() : null
           if (para && para.AddText) para.AddText(s.replace)
           return { replaced: true, find: s.find, all: false }
-        }, function (info) {
-          reply(requestId, info || { replaced: false, find: find })
+        }, function (info, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, info || { replaced: false, find: find })
         })
         return
       }
 
       if (type === "get_range" || type === "set_range" || type === "goto_cell") {
-        window.Asc.scope = payload
+        setScope(payload)
         callDoc(function () {
           var s = Asc.scope
           if (typeof Api.GetActiveSheet !== "function") return { error: "Not a spreadsheet." }
@@ -482,8 +610,9 @@
       }
 
       if (type === "undo" || type === "redo") {
-        window.Asc.plugin.executeMethod(type === "undo" ? "Undo" : "Redo", [], function () {
-          reply(requestId, { ok: true })
+        runMethod(type === "undo" ? "Undo" : "Redo", [], function (_value, error) {
+          if (error) reply(requestId, null, error)
+          else reply(requestId, { ok: true })
         })
         return
       }
@@ -559,7 +688,7 @@
         reply(requestId, { accepted: false })
         return
       }
-      window.Asc.scope = { ghost: current.text }
+      setScope({ ghost: current.text })
       callDoc(function () {
         var s = Asc.scope
         var doc = Api.GetDocument()
@@ -586,7 +715,7 @@
       return
     }
     dismissGhost(function () {
-      window.Asc.scope = { text: next }
+      setScope({ text: next })
       callDoc(function () {
         var s = Asc.scope
         if (typeof Api.GetDocument !== "function") return false
@@ -620,7 +749,7 @@
       if (done) done()
       return
     }
-    window.Asc.scope = { ghost: state.text }
+    setScope({ ghost: state.text })
     callDoc(function () {
       var s = Asc.scope
       var doc = Api.GetDocument()

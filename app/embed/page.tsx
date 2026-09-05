@@ -86,6 +86,7 @@ export default function EmbedPage() {
   const readyTimerRef = useRef<number | null>(null);
   const openingRef = useRef(false);
   const pluginReadyFromChild = useRef(false);
+  const pluginSourceRef = useRef<MessageEventSource | null>(null);
 
   const stopReadyPing = () => {
     if (readyTimerRef.current != null) {
@@ -168,6 +169,7 @@ export default function EmbedPage() {
       }
       if (body.requestId === "ready") {
         pluginReadyFromChild.current = true;
+        if (event.source) pluginSourceRef.current = event.source;
         return;
       }
       if (body.requestId) {
@@ -337,6 +339,7 @@ export default function EmbedPage() {
 
     const destroyEditor = () => {
       pluginReadyFromChild.current = false;
+      pluginSourceRef.current = null;
       try {
         editorRef.current?.destroyEditor?.();
       } catch {
@@ -563,21 +566,24 @@ export default function EmbedPage() {
     };
 
     const deliverPluginCommand = (data: Record<string, unknown>): boolean => {
-      const frames = findPluginFrames();
+      const targets = new Set<Window>();
+      const source = pluginSourceRef.current;
+      if (source && typeof (source as Window).postMessage === "function") {
+        targets.add(source as Window);
+      }
+      for (const plugin of findPluginFrames()) {
+        if (plugin.contentWindow) targets.add(plugin.contentWindow);
+      }
+      if (!targets.size) return false;
       let delivered = false;
-      for (const plugin of frames) {
-        const api = plugin.contentWindow as (Window & { Asc?: { plugin?: PluginHost } }) | null;
-        const host = api?.Asc?.plugin;
-        if (host?.onExternalPluginMessage) {
-          host.onExternalPluginMessage(data);
-          delivered = true;
-          continue;
-        }
-        // Frame exists but Asc.plugin is not ready yet — keep retrying.
+      for (const win of targets) {
         try {
-          plugin.contentWindow?.postMessage(data, "*");
+          // Prefer postMessage (same path as the ready ping). Direct
+          // onExternalPluginMessage across windows can leave callCommand hanging.
+          win.postMessage(data, "*");
+          delivered = true;
         } catch {
-          /* cross-origin plugin frame */
+          /* cross-origin / detached */
         }
       }
       return delivered;
