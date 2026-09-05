@@ -89,10 +89,29 @@ export default function EmbedPage() {
   const postToHost = (msg: EditorToHostMessage, transferables?: Transferable[]) => {
     if (typeof window === "undefined" || !window.parent || window.parent === window) return;
     const target = hostOriginRef.current || "*";
-    if (transferables && transferables.length > 0) {
-      window.parent.postMessage(msg, target, transferables);
-    } else {
-      window.parent.postMessage(msg, target);
+    const send = (dest: string) => {
+      if (transferables && transferables.length > 0) {
+        window.parent.postMessage(msg, dest, transferables);
+      } else {
+        window.parent.postMessage(msg, dest);
+      }
+    };
+    try {
+      send(target);
+    } catch {
+      if (target !== "*") send("*");
+    }
+    // Handshake events: also send "*" so a mismatched target origin cannot drop them.
+    if (
+      (!transferables || transferables.length === 0) &&
+      target !== "*" &&
+      (msg.type === "ready" || msg.type === "appReady" || msg.type === "documentReady" || msg.type === "error")
+    ) {
+      try {
+        send("*");
+      } catch {
+        /* ignore */
+      }
     }
   };
 
@@ -221,7 +240,11 @@ export default function EmbedPage() {
       const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
       const win = iframe?.contentWindow as typeof window | undefined;
       const iframeDoc = iframe?.contentDocument;
-      if (!iframeDoc || !win) throw new Error("Iframe not loaded");
+      if (!iframe || !iframeDoc || !win) throw new Error("Iframe not loaded");
+      if (iframe.dataset.jiPatched === "1") {
+        applyEditorChrome(iframeDoc);
+        return;
+      }
 
       const xhr = createXHRProxy(win.XMLHttpRequest);
       const fetchProxy = createFetchProxy(win);
@@ -248,6 +271,25 @@ export default function EmbedPage() {
       });
 
       applyEditorChrome(iframeDoc);
+      iframe.dataset.jiPatched = "1";
+    };
+
+    const watchEditorFrame = () => {
+      const tryPatch = () => {
+        try {
+          patchEditorFrame();
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      if (tryPatch()) return;
+      const root = document.getElementById("placeholder") || document.body;
+      const observer = new MutationObserver(() => {
+        if (tryPatch()) observer.disconnect();
+      });
+      observer.observe(root, { childList: true, subtree: true });
+      window.setTimeout(() => observer.disconnect(), 30_000);
     };
 
     const destroyEditor = () => {
@@ -383,6 +425,11 @@ export default function EmbedPage() {
       });
 
       editorRef.current = editor;
+      // Do not wait for onAppReady: the host handshake is 45s, and agent plugin
+      // load can delay that callback. Patch as soon as frameEditor exists.
+      watchEditorFrame();
+      setLoading(false);
+      postToHost({ type: "appReady" });
       return editor;
     };
 
