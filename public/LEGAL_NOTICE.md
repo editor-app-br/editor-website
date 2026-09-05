@@ -51,3 +51,4 @@ A integração do editor.app.br com sistemas web externos e corporativos ocorre 
 2. **Nenhuma Obra Derivada no Host:** O sistema host apenas transmite e recebe streams de bytes (ArrayBuffer) de documentos criados pelo usuário, sem incorporar ou derivar do código AGPL.
 3. **Privacidade e LGPD:** Todos os documentos são processados localmente na memória RAM do navegador do usuário final. O servidor editor.app.br não armazena, não inspeciona e não mantém cópia de nenhum documento de usuário.
 4. **Cache no origin do editor:** Hosts (incluindo apps desktop) podem abrir `/embed?warmup=1` para o navegador/webview persistir JS/WASM deste origin em Cache Storage / HTTP cache do usuário. Isso não é redistribuição: os arquivos não entram no binário do host. HTML (`/`, `/editor`, `/embed`) não é cacheado.
+5. **Documentação do integrador:** protocolo `postMessage`, plugin Agente e obrigações AGPL em https://editor.app.br/integrate.

@@ -10,11 +10,34 @@ const HIDE_PREVIEW_CHROME_CSS = `
   }
 `;
 
+/** Hide dummy Me avatar and EDITOR GRATUITO wordmark; keep toolbar/menus. */
+const HIDE_EMBED_BRAND_CSS = `
+  #header-logo,
+  .brand-logo,
+  .loading-logo,
+  .slot-btn-user-name,
+  .btn-current-user,
+  .color-user-name,
+  .box-cousers,
+  .btn-users {
+    display: none !important;
+  }
+`;
+
+function injectStyle(doc: Document, id: string, css: string) {
+  if (doc.getElementById(id)) return;
+  const style = doc.createElement("style");
+  style.id = id;
+  style.textContent = css;
+  doc.head.appendChild(style);
+}
+
 export function injectPreviewChrome(doc: Document | null | undefined) {
   if (!doc) return;
-  if (doc.getElementById("ji-embed-hide-chrome")) return;
-  const style = doc.createElement("style");
-  style.id = "ji-embed-hide-chrome";
-  style.textContent = HIDE_PREVIEW_CHROME_CSS;
-  doc.head.appendChild(style);
+  injectStyle(doc, "ji-embed-hide-chrome", HIDE_PREVIEW_CHROME_CSS);
+}
+
+export function injectEmbedChrome(doc: Document | null | undefined) {
+  if (!doc) return;
+  injectStyle(doc, "ji-embed-hide-brand", HIDE_EMBED_BRAND_CSS);
 }

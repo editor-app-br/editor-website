@@ -27,7 +27,7 @@ Nossa missão é garantir que **todas as categorias de usuários no Brasil** —
 - **Zero-Knowledge & Privacidade Absoluta:** O editor executa **100% no navegador do usuário** via WebAssembly (WASM). Seus documentos **nunca** são transmitidos, lidos ou armazenados em servidores externos.
 - **Suporte Total aos Formatos Office:** Compatibilidade nativa com arquivos `.docx` (Word), `.xlsx` (Excel), `.pptx` (PowerPoint) e visualização/conversão de `.pdf`.
 - **PWA & Funcionamento Offline:** Pode ser instalado como aplicativo no Windows, macOS, Linux, Android e iOS, continuando funcional mesmo sem internet.
-- **Thin-Embed API (`/embed`):** Permite que qualquer sistema externo incorpore o editor diretamente via `<iframe>` e `postMessage`, com custo zero ($0) de licença comercial.
+- **Thin-Embed API (`/embed`):** Permite que qualquer sistema externo incorpore o editor diretamente via `<iframe>` e `postMessage`, com custo zero ($0) de licença comercial. Documentação pública (protocolo + plugin Agente, AGPL): [editor.app.br/integrate](https://editor.app.br/integrate).
 
 ---
 

@@ -20,13 +20,9 @@ import {
   HostToEditorMessage,
 } from "@/utils/embed-protocol";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
-import { injectPreviewChrome } from "@/utils/embed-chrome";
+import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import { prefetchEditorAssets } from "@/utils/editor/warmup";
 import { AGENT_PLUGIN_GUID, getAgentPluginsData } from "@/utils/editor/plugins";
-import {
-  EDITOR_WORDMARK_BLACK,
-  EDITOR_WORDMARK_WHITE,
-} from "@/utils/branding";
 import { Loader2 } from "lucide-react";
 
 type PluginHost = {
@@ -211,6 +207,11 @@ export default function EmbedPage() {
     MockSocket.on("connect", server.handleConnect);
     MockSocket.on("disconnect", server.handleDisconnect);
 
+    const applyEditorChrome = (doc: Document | null | undefined) => {
+      if (hideChromeRef.current) injectPreviewChrome(doc);
+      else injectEmbedChrome(doc);
+    };
+
     const patchEditorFrame = () => {
       const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
       const win = iframe?.contentWindow as typeof window | undefined;
@@ -241,7 +242,7 @@ export default function EmbedPage() {
         if (e.key === "Escape") postToHost({ type: "escape" });
       });
 
-      if (hideChromeRef.current) injectPreviewChrome(iframeDoc);
+      applyEditorChrome(iframeDoc);
     };
 
     const destroyEditor = () => {
@@ -321,10 +322,7 @@ export default function EmbedPage() {
               },
             },
             logo: {
-              image: location.origin + EDITOR_WORDMARK_BLACK,
-              imageDark: location.origin + EDITOR_WORDMARK_WHITE,
-              url: location.origin,
-              visible: !isPreview,
+              visible: false,
             },
           },
         },
@@ -339,12 +337,10 @@ export default function EmbedPage() {
           },
           onDocumentReady: () => {
             setLoading(false);
-            if (hideChromeRef.current) {
-              const iframe = document.querySelector<HTMLIFrameElement>(
-                'iframe[name="frameEditor"]',
-              );
-              injectPreviewChrome(iframe?.contentDocument);
-            }
+            const iframe = document.querySelector<HTMLIFrameElement>(
+              'iframe[name="frameEditor"]',
+            );
+            applyEditorChrome(iframe?.contentDocument);
             postToHost({ type: "documentReady" });
           },
           onDocumentStateChange: (e: { data: boolean }) => {

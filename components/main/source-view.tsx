@@ -89,6 +89,11 @@ export function SourceView() {
       </section>
 
       <p className="text-sm text-text-secondary">
+        Integração iframe + plugin Agente:{" "}
+        <Link href="/integrate" className="text-primary font-medium hover:underline">
+          /integrate
+        </Link>
+        {" · "}
         Aviso legal completo:{" "}
         <Link href="/legal" className="text-primary font-medium hover:underline">
           /legal

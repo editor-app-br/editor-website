@@ -131,6 +131,9 @@ export function AboutView() {
             ))}
           </ul>
           <div className="flex flex-wrap gap-4 text-sm font-semibold">
+            <Link href="/integrate" className="text-primary hover:underline">
+              Integrar via iframe
+            </Link>
             <Link href="/source" className="text-primary hover:underline">
               Código-fonte (AGPL §13)
             </Link>

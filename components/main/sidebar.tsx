@@ -7,7 +7,7 @@ import {
   FolderOpen,
   Info,
   Settings,
-  Puzzle,
+  Code2,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState, useEffect } from "react";
@@ -178,6 +178,24 @@ export function Sidebar({ pathname }: SidebarProps) {
             )}
           />
           {t("Settings")}
+        </Link>
+
+        <Link
+          href="/integrate"
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors rounded-md",
+            pathname === "/integrate"
+              ? "bg-primary/10 text-primary"
+              : "text-text-secondary hover:text-foreground hover:bg-sidebar-hover",
+          )}
+        >
+          <Code2
+            className={cn(
+              "w-5 h-5",
+              pathname === "/integrate" ? "text-primary" : "text-text-secondary",
+            )}
+          />
+          Integrar
         </Link>
 
         <Link
