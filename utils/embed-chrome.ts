@@ -10,11 +10,8 @@ const HIDE_PREVIEW_CHROME_CSS = `
   }
 `;
 
-/** Hide dummy Me avatar and EDITOR GRATUITO wordmark; keep toolbar/menus. */
+/** Hide dummy Me avatar only. Keep EDITOR GRATUITO logo and File → About (AGPL). */
 const HIDE_EMBED_BRAND_CSS = `
-  #header-logo,
-  .brand-logo,
-  .loading-logo,
   .slot-btn-user-name,
   .btn-current-user,
   .color-user-name,

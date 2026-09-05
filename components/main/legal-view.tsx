@@ -77,9 +77,12 @@ export function LegalView() {
       <section>
         <h2>3. Integração Thin-Embed</h2>
         <p>
-          Integrações externas usam <code>&lt;iframe&gt;</code> +{" "}
-          <code>postMessage</code>. O sistema host troca apenas bytes de
-          documentos; documentos são processados localmente no navegador.
+          Integrações externas (incluindo o JusIntegra) usam{" "}
+          <code>&lt;iframe&gt;</code> + <code>postMessage</code> para{" "}
+          <a href="https://editor.app.br/embed">editor.app.br/embed</a> (também{" "}
+          <a href="https://editor.com.br">editor.com.br</a>). O sistema host
+          troca apenas bytes de documentos; documentos são processados
+          localmente no navegador.
           O host pode pré-carregar <code>/embed?warmup=1</code> para o
           navegador cachear JS/WASM neste origin (não no binário do host).
           HTML da aplicação não é cacheado. Documentação do protocolo e do

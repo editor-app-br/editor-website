@@ -51,3 +51,12 @@ export const UPSTREAM_COMPONENTS = [
 ] as const;
 
 export const LEGAL_CONTACT = "contato@prata.dev.br";
+
+export const PUBLIC_EDITOR_HOSTS = ["editor.app.br", "editor.com.br"] as const;
+export const PUBLIC_EDITOR_URL = "https://editor.app.br";
+export const PUBLIC_EDITOR_ALIAS_URL = "https://editor.com.br";
+export const PUBLIC_ABOUT_URL = `${PUBLIC_EDITOR_URL}/about`;
+export const PUBLIC_LEGAL_URL = `${PUBLIC_EDITOR_URL}/legal`;
+export const PUBLIC_SOURCE_URL = `${PUBLIC_EDITOR_URL}/source`;
+export const PUBLIC_INTEGRATE_URL = `${PUBLIC_EDITOR_URL}/integrate`;
+export const PUBLIC_CUBE_LOGO = "/editor_cube_transparent.png";

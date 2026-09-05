@@ -23,6 +23,13 @@ import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import { prefetchEditorAssets } from "@/utils/editor/warmup";
 import { AGENT_PLUGIN_GUID, getAgentPluginsData } from "@/utils/editor/plugins";
+import { EmbedLegal } from "@/components/embed/embed-legal";
+import {
+  LEGAL_CONTACT,
+  PUBLIC_ABOUT_URL,
+  PUBLIC_CUBE_LOGO,
+  PUBLIC_EDITOR_URL,
+} from "@/utils/attribution";
 import { Loader2 } from "lucide-react";
 
 type PluginHost = {
@@ -62,6 +69,7 @@ export default function EmbedPage() {
   const [loading, setLoading] = useState(true);
   const [appRoot, setAppRoot] = useState<string>("/v9.3.1-1");
   const [warmupLabel, setWarmupLabel] = useState<string | null>(null);
+  const [showLegal, setShowLegal] = useState(true);
   const isDirty = useRef(false);
   const editorRef = useRef<DocEditor | null>(null);
   const serverRef = useRef<EditorServer | null>(null);
@@ -71,6 +79,7 @@ export default function EmbedPage() {
   const saveRequestIdRef = useRef<string | null>(null);
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
+  const openingRef = useRef(false);
 
   const stopReadyPing = () => {
     if (readyTimerRef.current != null) {
@@ -90,15 +99,14 @@ export default function EmbedPage() {
   };
 
   useEffect(() => {
-    let cancelled = false;
     const searchParams = new URLSearchParams(window.location.search);
     const isWarmup = searchParams.get("warmup") === "1";
-    void loadEmbedPartnerConfig().then(() => {
-      if (cancelled || isWarmup) return;
+    void loadEmbedPartnerConfig();
+    if (!isWarmup) {
       const pingReady = () => postToHost({ type: "ready", version: EMBED_PROTOCOL_VERSION });
       pingReady();
       readyTimerRef.current = window.setInterval(pingReady, 500);
-    });
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") postToHost({ type: "escape" });
@@ -145,7 +153,6 @@ export default function EmbedPage() {
     window.addEventListener("message", onAgentMessage);
 
     return () => {
-      cancelled = true;
       stopReadyPing();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("message", onAgentMessage);
@@ -162,6 +169,7 @@ export default function EmbedPage() {
     const isWarmup = searchParams.get("warmup") === "1";
 
     if (isWarmup) {
+      setShowLegal(false);
       setWarmupLabel("Preparando cache do editor…");
       void prefetchEditorAssets(resolvedAppRoot, (done, total) => {
         setWarmupLabel(`Preparando cache do editor… ${done}/${total}`);
@@ -321,8 +329,23 @@ export default function EmbedPage() {
                 change: false,
               },
             },
+            about: !isPreview,
+            feedback: false,
+            customer: isPreview
+              ? undefined
+              : {
+                  name: "EDITOR GRATUITO (editor.app.br / editor.com.br)",
+                  www: PUBLIC_EDITOR_URL,
+                  mail: LEGAL_CONTACT,
+                  info: "Software livre GNU AGPL v3. Motor ONLYOFFICE Community Edition © Ascensio System SIA. Código-fonte: editor.app.br/source",
+                  logo: `${location.origin}${PUBLIC_CUBE_LOGO}`,
+                  logoDark: `${location.origin}${PUBLIC_CUBE_LOGO}`,
+                },
             logo: {
-              visible: false,
+              visible: !isPreview,
+              image: `${location.origin}${PUBLIC_CUBE_LOGO}`,
+              imageDark: `${location.origin}${PUBLIC_CUBE_LOGO}`,
+              url: PUBLIC_ABOUT_URL,
             },
           },
         },
@@ -334,8 +357,10 @@ export default function EmbedPage() {
               console.error(err);
             }
             setLoading(false);
+            postToHost({ type: "appReady" });
           },
           onDocumentReady: () => {
+            openingRef.current = false;
             setLoading(false);
             const iframe = document.querySelector<HTMLIFrameElement>(
               'iframe[name="frameEditor"]',
@@ -379,6 +404,7 @@ export default function EmbedPage() {
       }
       script.onload = () => callback();
       script.onerror = () => {
+        openingRef.current = false;
         postToHost({ type: "error", message: "Failed to load DocsAPI script" });
       };
     };
@@ -400,20 +426,43 @@ export default function EmbedPage() {
       return true;
     };
 
+    const deliverPluginCommandWhenReady = (data: Record<string, unknown>, requestId?: string) => {
+      if (deliverPluginCommand(data)) return;
+      const started = Date.now();
+      const tick = window.setInterval(() => {
+        if (deliverPluginCommand(data)) {
+          window.clearInterval(tick);
+          return;
+        }
+        if (Date.now() - started < 12_000) return;
+        window.clearInterval(tick);
+        postToHost({
+          type: "commandResult",
+          requestId: requestId || "",
+          error: "OnlyOffice agent plugin is not loaded.",
+        });
+      }, 250);
+    };
+
     const handleHostMessage = async (event: MessageEvent<HostToEditorMessage>) => {
-      await loadEmbedPartnerConfig();
-      if (!isAllowedEmbedHostOrigin(event.origin)) return;
+      if (!isAllowedEmbedHostOrigin(event.origin)) {
+        await loadEmbedPartnerConfig();
+        if (!isAllowedEmbedHostOrigin(event.origin)) return;
+      }
       hostOriginRef.current = event.origin;
       const data = event.data;
       if (!data || typeof data !== "object") return;
 
       if (data.type === "open") {
+        if (openingRef.current || editorRef.current) return;
         try {
           stopReadyPing();
           setLoading(true);
           destroyEditor();
+          openingRef.current = true;
           pluginModeRef.current = data.plugins === "none" || data.variant === "preview" ? "none" : "agent";
           hideChromeRef.current = data.hideChrome === true || data.variant === "preview";
+          setShowLegal(!hideChromeRef.current);
           fileMetaRef.current = { fileName: data.fileName, fileType: String(data.fileType) };
           const blob = new Blob([data.bytes]);
           const file = new File([blob], data.fileName, { type: "application/octet-stream" });
@@ -433,6 +482,7 @@ export default function EmbedPage() {
             });
           });
         } catch (err: unknown) {
+          openingRef.current = false;
           const message = err instanceof Error ? err.message : "Failed to open document";
           postToHost({ type: "error", message, requestId: data.requestId });
           setLoading(false);
@@ -476,23 +526,20 @@ export default function EmbedPage() {
       }
 
       if (data.type === "destroy") {
+        openingRef.current = false;
         destroyEditor();
         return;
       }
 
       if (data.type === "command") {
-        const delivered = deliverPluginCommand({
-          type: data.name,
-          requestId: data.requestId,
-          payload: data.payload || {},
-        });
-        if (!delivered) {
-          postToHost({
-            type: "commandResult",
+        deliverPluginCommandWhenReady(
+          {
+            type: data.name,
             requestId: data.requestId,
-            error: "OnlyOffice agent plugin is not loaded.",
-          });
-        }
+            payload: data.payload || {},
+          },
+          data.requestId,
+        );
       }
     };
 
@@ -520,6 +567,7 @@ export default function EmbedPage() {
       <div id="placeholder" className="w-full h-full">
         <iframe className="w-0 h-0 hidden" src={appRoot + PRELOAD_HTML} />
       </div>
+      <EmbedLegal visible={showLegal && !loading} />
     </div>
   );
 }

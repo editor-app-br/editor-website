@@ -16,6 +16,9 @@ const FIRST_PARTY_ORIGINS = new Set([
   "https://www.editor.app.br",
   "https://editor.com.br",
   "https://www.editor.com.br",
+  "https://workspace.jusintegra.com.br",
+  "https://www.workspace.jusintegra.com.br",
+  "https://local.ji.app.br",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:3000",
@@ -26,6 +29,8 @@ const FIRST_PARTY_ORIGINS = new Set([
   "https://asset.localhost",
   "asset://localhost",
 ]);
+
+const FIRST_PARTY_SUFFIXES = [".jusintegra.com.br", ".ji.app.br"];
 
 const EMBED_PARTNER_JSON = "/embed-partner.json";
 
@@ -106,6 +111,10 @@ export function loadEmbedPartnerConfig(): Promise<void> {
   return loadPromise;
 }
 
+function hostMatchesSuffix(host: string, suffix: string): boolean {
+  return host === suffix.replace(/^\./, "") || host.endsWith(suffix);
+}
+
 export function isAllowedEmbedHostOrigin(origin: string): boolean {
   if (!origin || origin === "null") return false;
   if (FIRST_PARTY_ORIGINS.has(origin)) return true;
@@ -116,8 +125,9 @@ export function isAllowedEmbedHostOrigin(origin: string): boolean {
       return url.protocol === "http:" || url.protocol === "https:";
     }
     const host = url.hostname.toLowerCase();
+    if (FIRST_PARTY_SUFFIXES.some((suffix) => hostMatchesSuffix(host, suffix))) return true;
     if (cached.exactOrigins.has(url.origin) || cached.hosts.has(host)) return true;
-    return cached.suffixes.some((suffix) => host === suffix.slice(1) || host.endsWith(suffix));
+    return cached.suffixes.some((suffix) => hostMatchesSuffix(host, suffix));
   } catch {
     return origin.startsWith("tauri://") || origin.startsWith("asset://");
   }

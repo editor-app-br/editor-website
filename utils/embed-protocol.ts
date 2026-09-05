@@ -108,6 +108,9 @@ export type EditorToHostMessage =
       accepted?: boolean;
     }
   | {
+      type: "appReady";
+    }
+  | {
       type: "documentReady";
     }
   | {
