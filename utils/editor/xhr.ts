@@ -7,7 +7,10 @@ export interface XHRMiddleware {
  * @param BaseXHR The original XMLHttpRequest class
  * @returns The enhanced XMLHttpRequest class
  */
-export function createXHRProxy(BaseXHR = globalThis.XMLHttpRequest) {
+export function createXHRProxy(
+  BaseXHR = globalThis.XMLHttpRequest,
+  scope: Pick<typeof globalThis, "Request"> = globalThis,
+) {
   return class ProxyXMLHttpRequest extends BaseXHR {
     private static _middlewares: XHRMiddleware[] = [];
 
@@ -95,7 +98,7 @@ export function createXHRProxy(BaseXHR = globalThis.XMLHttpRequest) {
           reqInit.credentials = "include";
         }
 
-        request = new Request(this._requestUrl, reqInit);
+        request = new scope.Request(this._requestUrl, reqInit);
       } catch (e) {
         // Unable to create Request, do not use middleware
         return false;

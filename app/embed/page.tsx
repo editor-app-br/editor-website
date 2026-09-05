@@ -247,7 +247,7 @@ export default function EmbedPage() {
         return;
       }
 
-      const xhr = createXHRProxy(win.XMLHttpRequest);
+      const xhr = createXHRProxy(win.XMLHttpRequest, win);
       const fetchProxy = createFetchProxy(win);
       const NativeWorker = win.Worker;
 

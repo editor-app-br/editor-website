@@ -11,16 +11,20 @@ export type FetchProxy = typeof fetch & {
  * @returns The enhanced fetch function
  */
 export function createFetchProxy(
-  target: (Window & { fetch: typeof fetch }) | typeof fetch = globalThis.fetch,
+  target: (Window & { fetch: typeof fetch; Request: typeof Request }) | typeof fetch = globalThis.fetch,
 ): FetchProxy {
   const middlewares: XHRMiddleware[] = [];
-  const BaseFetch =
-    typeof target === "function" ? target : target.fetch.bind(target);
+  const isWindow = typeof target !== "function";
+  const BaseFetch = isWindow ? target.fetch.bind(target) : target;
+  // Relative URLs (locale/pt.json) must resolve against the iframe document,
+  // not the parent /embed page. Parent Request turns that into /locale/pt.json
+  // (404) and OnlyOffice shows "The interface language is not loaded".
+  const RequestCtor = isWindow ? target.Request : Request;
 
   const proxy = (async (input: RequestInfo | URL, init?: RequestInit) => {
     let request: Request;
     try {
-      request = new Request(input, init);
+      request = new RequestCtor(input, init);
     } catch (e) {
       // If request cannot be created, fallback to native fetch
       return BaseFetch(input, init);

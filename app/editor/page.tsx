@@ -71,7 +71,7 @@ export default function Page() {
         throw new Error("Iframe not loaded");
       }
 
-      const xhr = createXHRProxy(win.XMLHttpRequest);
+      const xhr = createXHRProxy(win.XMLHttpRequest, win);
       const fetchProxy = createFetchProxy(win);
       const _Worker = win.Worker;
 
