@@ -455,33 +455,18 @@ export default function EmbedPage() {
               postToHost({ type: "documentReady" });
               return;
             }
-            // Host marks the Agent ready on documentReady and immediately
-            // sends doc_*. Wait for the plugin's own ready ping — an empty
-            // iframe_asc.* is not enough (background/half-init crashes).
+            // Prefer waiting briefly for the Agent ready ping, but never kill the
+            // human editor with a fatal error — that left a sad-document pane.
             const started = Date.now();
-            const finish = (ok: boolean) => {
-              if (!ok) {
-                postToHost({
-                  type: "error",
-                  message: "OnlyOffice agent plugin is not loaded.",
-                });
-                return;
-              }
-              postToHost({ type: "documentReady" });
-            };
+            const finish = () => postToHost({ type: "documentReady" });
             if (pluginCanReceive()) {
-              finish(true);
+              finish();
               return;
             }
             const tick = window.setInterval(() => {
-              if (pluginCanReceive()) {
+              if (pluginCanReceive() || Date.now() - started > 8_000) {
                 window.clearInterval(tick);
-                finish(true);
-                return;
-              }
-              if (Date.now() - started > 20_000) {
-                window.clearInterval(tick);
-                finish(false);
+                finish();
               }
             }, 200);
           },

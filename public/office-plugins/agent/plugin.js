@@ -776,24 +776,6 @@
     })
   }
 
-  var contextTimer = null
-  var lastPrefix = ""
-
-  function requestCompletion() {
-    if (ghostState().active) return
-    callDoc(function () {
-      if (typeof Api.GetDocument !== "function") return { prefix: "", suffix: "" }
-      var para = Api.GetDocument().GetCurrentParagraph && Api.GetDocument().GetCurrentParagraph()
-      var text = para && para.GetText ? String(para.GetText()) : ""
-      return { prefix: text, suffix: "" }
-    }, function (info) {
-      var prefix = info && info.prefix ? String(info.prefix) : ""
-      if (prefix.trim().length < 12 || prefix === lastPrefix) return
-      lastPrefix = prefix
-      emit("completion/request", { prefix: prefix, suffix: (info && info.suffix) || "" })
-    })
-  }
-
   function onEditorKey(event) {
     var key = event && (event.KeyCode || event.keyCode || event.keycode)
     if (key === 9 && ghostState().active) {
@@ -850,10 +832,7 @@
       window.Asc.plugin.event_onKeyDown = onEditorKey
       try {
         window.Asc.plugin.attachEvent("onKeyDown", onEditorKey)
-        window.Asc.plugin.attachEvent("onTargetPositionChanged", function () {
-          if (contextTimer) window.clearTimeout(contextTimer)
-          contextTimer = window.setTimeout(requestCompletion, 700)
-        })
+        // Do not attach onTargetPositionChanged → callCommand (WASM dies after minutes).
       } catch (err) {}
       reply("ready", { ok: true })
     }
