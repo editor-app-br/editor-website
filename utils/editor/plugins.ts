@@ -88,7 +88,8 @@ export const AGENT_PLUGIN_MANIFEST = {
       // OnlyOffice 9: isSystem → visible=false and the iframe never mounts.
       // type:background → Background Plugins menu, off until the user toggles it
       // (callCommand on a half-started frame crashes the editor).
-      // type:invisible maps to PluginType.Unvisible and autostarts hidden.
+      // type:invisible maps to PluginType.Invisible (sdk) and autostarts hidden.
+      // Note: docs say "unvisible" but live getType() only accepts "invisible".
       isSystem: false,
       type: "invisible",
       initDataType: "none",

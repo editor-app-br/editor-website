@@ -17,6 +17,7 @@ import { EditorServer } from "@/utils/editor/server";
 import {
   EMBED_PROTOCOL_VERSION,
   embedMimeForType,
+  EmbedPluginDiag,
   EditorToHostMessage,
   HostToEditorMessage,
 } from "@/utils/embed-protocol";
@@ -41,6 +42,79 @@ import { Loader2 } from "lucide-react";
 type PluginHost = {
   onExternalPluginMessage?: (data: Record<string, unknown>) => void;
 };
+
+type FrameEditorWindow = Window & {
+  Asc?: {
+    editor?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
+  };
+  DE?: {
+    getController?: (name: string) => {
+      api?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
+    };
+  };
+  g_asc_plugins?: { plugins?: unknown[] };
+};
+
+function topIsSameOrigin(): boolean {
+  try {
+    return window.top === window || window.top?.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function collectPluginDiag(extra?: Partial<EmbedPluginDiag>): EmbedPluginDiag {
+  const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
+  let frameDoc = false;
+  let pluginFrames = 0;
+  try {
+    const doc = iframe?.contentDocument || null;
+    frameDoc = !!doc;
+    if (doc) {
+      pluginFrames = [
+        doc.getElementById(`iframe_${AGENT_PLUGIN_GUID}`),
+        ...Array.from(doc.querySelectorAll("iframe")),
+      ].filter((node) => {
+        if (!(node instanceof HTMLIFrameElement)) return false;
+        const id = node.id || "";
+        const src = node.getAttribute("src") || "";
+        return id.includes("7E4A1C90") || src.includes("/office-plugins/agent");
+      }).length;
+    }
+  } catch {
+    frameDoc = false;
+  }
+  return {
+    crossOriginIsolated: window.crossOriginIsolated === true,
+    sab: typeof SharedArrayBuffer,
+    topSameOrigin: topIsSameOrigin(),
+    jiPatched: iframe?.dataset.jiPatched === "1",
+    frameEditor: !!iframe,
+    frameDoc,
+    pluginFrames,
+    pluginReady: false,
+    ...extra,
+  };
+}
+
+function forceAgentPluginRun(): string {
+  const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
+  const win = iframe?.contentWindow as FrameEditorWindow | null | undefined;
+  if (!win) return "no-frame";
+  try {
+    const run =
+      win.Asc?.editor?.asc_pluginRun ||
+      win.DE?.getController?.("Main")?.api?.asc_pluginRun ||
+      win.DE?.getController?.("Common")?.api?.asc_pluginRun;
+    if (typeof run !== "function") {
+      return `no-api plugins=${win.g_asc_plugins?.plugins?.length ?? "?"}`;
+    }
+    run.call(win.Asc?.editor || win, AGENT_PLUGIN_GUID, 0, "");
+    return "ran";
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
 
 function parseAgentPayload(raw: unknown): {
   type?: string;
@@ -129,7 +203,12 @@ export default function EmbedPage() {
     const isWarmup = searchParams.get("warmup") === "1";
     void loadEmbedPartnerConfig();
     if (!isWarmup) {
-      const pingReady = () => postToHost({ type: "ready", version: EMBED_PROTOCOL_VERSION });
+      const pingReady = () =>
+        postToHost({
+          type: "ready",
+          version: EMBED_PROTOCOL_VERSION,
+          diag: collectPluginDiag({ pluginReady: pluginReadyFromChild.current }),
+        });
       pingReady();
       readyTimerRef.current = window.setInterval(pingReady, 500);
     }
@@ -317,6 +396,42 @@ export default function EmbedPage() {
 
       applyEditorChrome(iframeDoc);
       iframe.dataset.jiPatched = "1";
+
+      // Unblock OnlyOffice mergePlugins if the async plugins.json fetch stalls
+      // (observed when /embed is a third-party iframe under workspace).
+      const ensurePluginLoadConfig = () => {
+        const common = (win as Window & { Common?: { Utils?: { loadConfig?: unknown } } }).Common;
+        if (!common?.Utils || typeof common.Utils.loadConfig !== "function") return false;
+        if ((common.Utils as { __jiAgentLoadConfig?: boolean }).__jiAgentLoadConfig) return true;
+        const nativeLoad = common.Utils.loadConfig.bind(common.Utils) as (
+          url: string,
+          cb: (obj: unknown) => void,
+        ) => void;
+        common.Utils.loadConfig = (url: string, cb: (obj: unknown) => void) => {
+          try {
+            const resolved = new URL(url, win.location.href);
+            if (isPluginsJsonPath(resolved.pathname) && pluginModeRef.current === "agent") {
+              cb(getAgentPluginsData(location.origin));
+              return;
+            }
+            if (isPluginsJsonPath(resolved.pathname) && pluginModeRef.current === "none") {
+              cb({ url: "", pluginsData: [], autostart: [] });
+              return;
+            }
+          } catch {
+            /* fall through */
+          }
+          nativeLoad(url, cb);
+        };
+        (common.Utils as { __jiAgentLoadConfig?: boolean }).__jiAgentLoadConfig = true;
+        return true;
+      };
+      if (!ensurePluginLoadConfig()) {
+        let n = 0;
+        const iv = win.setInterval(() => {
+          if (ensurePluginLoadConfig() || ++n > 200) win.clearInterval(iv);
+        }, 25);
+      }
     };
 
     const watchEditorFrame = () => {
@@ -431,6 +546,7 @@ export default function EmbedPage() {
                 change: false,
               },
             },
+            plugins: pluginModeRef.current === "agent",
             about: !isPreview,
             feedback: false,
             customer: isPreview
@@ -475,10 +591,17 @@ export default function EmbedPage() {
             // the workspace bind tools while iframe_asc.* never existed, then
             // retries remounted the host and hit the 45s handshake sad-pane.
             let finished = false;
-            const finish = () => {
+            let forceAttempted = false;
+            const finish = (forceRun?: string) => {
               if (finished) return;
               finished = true;
-              postToHost({ type: "documentReady" });
+              postToHost({
+                type: "documentReady",
+                diag: collectPluginDiag({
+                  pluginReady: pluginCanReceive() || findPluginFrames().length > 0,
+                  forceRun,
+                }),
+              });
             };
             const pluginLive = () =>
               pluginCanReceive() || findPluginFrames().length > 0;
@@ -489,13 +612,21 @@ export default function EmbedPage() {
             const tick = window.setInterval(() => {
               if (!pluginLive()) return;
               window.clearInterval(tick);
-              finish();
+              finish(forceAttempted ? "ran" : undefined);
             }, 200);
+            // Third-party /embed (workspace): OnlyOffice autostart sometimes never
+            // mounts iframe_asc.* — nudge asc_pluginRun once after plugins settle.
+            window.setTimeout(() => {
+              if (finished || forceAttempted || pluginLive()) return;
+              forceAttempted = true;
+              const result = forceAgentPluginRun();
+              console.warn("[embed] forceAgentPluginRun@1.5s:", result);
+            }, 1_500);
             // Safety: never fatal-error the human editor. After 45s still notify
             // so Agent tools can surface a clear timeout instead of hanging forever.
             window.setTimeout(() => {
               window.clearInterval(tick);
-              finish();
+              finish(forceAttempted ? "timeout-after-force" : "timeout");
             }, 45_000);
           },
           onDocumentStateChange: (e: { data: boolean }) => {

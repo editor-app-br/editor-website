@@ -62,10 +62,24 @@ export type HostToEditorMessage =
       payload?: Record<string, unknown>;
     };
 
+/** Debug fields for Agent plugin mount failures (third-party /embed). */
+export type EmbedPluginDiag = {
+  crossOriginIsolated: boolean;
+  sab: string;
+  topSameOrigin: boolean;
+  jiPatched: boolean;
+  frameEditor: boolean;
+  frameDoc: boolean;
+  pluginFrames: number;
+  pluginReady: boolean;
+  forceRun?: string;
+};
+
 export type EditorToHostMessage =
   | {
       type: "ready";
       version: string;
+      diag?: EmbedPluginDiag;
     }
   | {
       type: "dirty";
@@ -112,6 +126,7 @@ export type EditorToHostMessage =
     }
   | {
       type: "documentReady";
+      diag?: EmbedPluginDiag;
     }
   | {
       type: "warmed";

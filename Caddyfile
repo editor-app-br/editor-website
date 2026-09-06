@@ -27,11 +27,20 @@
     }
 
     # Cache immutable versioned OnlyOffice assets (permanent 1 year+)
+    # Exclude plugins.json — Agent autostart list is rewritten on deploys.
     @onlyoffice_versioned {
         path /v*-*/*
+        not path /v*-*/plugins.json
     }
     header @onlyoffice_versioned {
         Cache-Control "public, max-age=31536000, immutable"
+        Access-Control-Allow-Origin "*"
+    }
+    @onlyoffice_plugins_json {
+        path /v*-*/plugins.json
+    }
+    header @onlyoffice_plugins_json {
+        Cache-Control "no-store"
         Access-Control-Allow-Origin "*"
     }
 
