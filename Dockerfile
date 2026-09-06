@@ -96,6 +96,16 @@ COPY --from=documentserver /var/www/onlyoffice/documentserver/sdkjs-plugins ./v$
 RUN cp "./v${DS_VERSION}-${HASH}/web-apps/apps/api/documents/api.js.tpl" \
        "./v${DS_VERSION}-${HASH}/web-apps/apps/api/documents/api.js"
 
+# public/v9.3* is dockerignored (huge OO tree). Bake Agent autostart list here so
+# DocsAPI's sync plugins.json XHR works even when the embed XHR proxy loses the race.
+RUN printf '%s\n' \
+  '{' \
+  '  "url": "",' \
+  '  "pluginsData": ["/office-plugins/agent/config.json"],' \
+  '  "autostart": ["asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}"]' \
+  '}' \
+  > "./v${DS_VERSION}-${HASH}/plugins.json"
+
 # Copy editor plugins tree to /srv/plugins for plugins.editor.app.br (:8081)
 COPY plugins /srv/plugins
 
