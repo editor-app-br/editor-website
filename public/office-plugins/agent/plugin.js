@@ -29,6 +29,16 @@
     }
   }
 
+  function normalizeNewlines(text) {
+    return String(text == null ? "" : text)
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+  }
+
   function setScope(values) {
     if (!window.Asc) window.Asc = {}
     // Never replace Asc.scope: callCommand does JSON.stringify(window.Asc.scope).
@@ -241,7 +251,7 @@
       }
 
       if (type === "insert_text" || type === "type") {
-        var insert = String(payload.text || "")
+        var insert = normalizeNewlines(payload.text || "")
         var needsFormat = !!(
           payload.font ||
           payload.size ||
@@ -341,7 +351,7 @@
       }
 
       if (type === "replace_selection") {
-        runMethod("PasteText", [String(payload.text || "")], function (_value, error) {
+        runMethod("PasteText", [normalizeNewlines(payload.text || "")], function (_value, error) {
           if (error) reply(requestId, null, error)
           else reply(requestId, { replaced: true })
         })
