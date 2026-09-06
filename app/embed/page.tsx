@@ -237,106 +237,136 @@ function ensureAgentPluginRun(win: FrameEditorWindow): string {
           }
         } catch (err) {}
 
-        if (hasGoodGh() && hasFrame()) return "wm-ok";
+        var path = hasGoodGh() && hasFrame() ? "wm-ok" : "manual";
 
-        try {
-          var Ctor = window.Asc && window.Asc.Ngf;
-          if (!Ctor) return "no-Ngf";
-          var startData = new Ctor();
-          startData.setAttribute("guid", g);
-          if (typeof mgr.Anc === "function") mgr.Anc(startData);
+        if (!(hasGoodGh() && hasFrame())) {
           try {
-            if (window.AscCommon && window.AscCommon.Dq) {
-              startData.setAttribute("theme", window.AscCommon.Dq);
-            }
-          } catch (err) {}
-
-          var plugin = typeof mgr.eOa === "function" ? mgr.eOa(g) : mgr.e2[g];
-          var isSystem = false;
-          try {
-            isSystem = !!(mgr.e2[g].y5b && mgr.e2[g].y5b());
-          } catch (err) {}
-
-          if (!mgr.GH) mgr.GH = {};
-          // Drop a broken prior entry (DOM stub from older fallbacks).
-          if (mgr.GH[g] && !hasGoodGh()) {
+            var Ctor = window.Asc && window.Asc.Ngf;
+            if (!Ctor) return "no-Ngf";
+            var startData = new Ctor();
+            startData.setAttribute("guid", g);
+            if (typeof mgr.Anc === "function") mgr.Anc(startData);
             try {
-              var bad = document.getElementById("iframe_" + g);
-              if (bad && bad.parentNode) bad.parentNode.removeChild(bad);
-            } catch (err) {}
-            delete mgr.GH[g];
-          }
-
-          if (!mgr.GH[g]) {
-            mgr.GH[g] = {
-              K9: "iframe_" + g,
-              $na: 0,
-              yzd: false,
-              y5b: isSystem,
-              E4: startData,
-              n0b: -1,
-              $Ze: false,
-              Bsa: !!(plugin && plugin.Bsa),
-            };
-          }
-
-          if (!hasFrame() && typeof mgr.show === "function") {
-            mgr.show(g);
-          }
-
-          if (!hasFrame()) {
-            var base =
-              (plugin && plugin.$M && String(plugin.$M).length
-                ? plugin.$M
-                : origin + "/office-plugins/agent/");
-            var rel =
-              (plugin && plugin.OG && plugin.OG[0] && plugin.OG[0].url) ||
-              "index.html";
-            var theme = "light";
-            try {
-              if (window.AscCommon && window.AscCommon.Dq && window.AscCommon.Dq.type) {
-                theme = String(window.AscCommon.Dq.type);
+              if (window.AscCommon && window.AscCommon.Dq) {
+                startData.setAttribute("theme", window.AscCommon.Dq);
               }
             } catch (err) {}
-            var ifr = document.createElement("iframe");
-            ifr.name = "iframe_" + g;
-            ifr.id = "iframe_" + g;
-            ifr.src = base + rel + "?lang=en&theme-type=" + theme;
-            ifr.style.cssText =
-              "position:absolute;top:-100px;left:0;width:10000px;height:100px;overflow:hidden;z-index:-1000";
-            ifr.setAttribute("frameBorder", "0");
-            ifr.setAttribute("allow", "autoplay");
-            document.body.appendChild(ifr);
+
+            var plugin = typeof mgr.eOa === "function" ? mgr.eOa(g) : mgr.e2[g];
+            var isSystem = false;
+            try {
+              isSystem = !!(mgr.e2[g].y5b && mgr.e2[g].y5b());
+            } catch (err) {}
+
+            if (!mgr.GH) mgr.GH = {};
+            // Drop a broken prior entry (DOM stub from older fallbacks).
+            if (mgr.GH[g] && !hasGoodGh()) {
+              try {
+                var bad = document.getElementById("iframe_" + g);
+                if (bad && bad.parentNode) bad.parentNode.removeChild(bad);
+              } catch (err) {}
+              delete mgr.GH[g];
+            }
+
+            if (!mgr.GH[g]) {
+              mgr.GH[g] = {
+                K9: "iframe_" + g,
+                $na: 0,
+                yzd: false,
+                y5b: isSystem,
+                E4: startData,
+                n0b: -1,
+                $Ze: false,
+                Bsa: !!(plugin && plugin.Bsa),
+              };
+            }
+
+            if (!hasFrame() && typeof mgr.show === "function") {
+              mgr.show(g);
+            }
+
+            if (!hasFrame()) {
+              var base =
+                (plugin && plugin.$M && String(plugin.$M).length
+                  ? plugin.$M
+                  : origin + "/office-plugins/agent/");
+              var rel =
+                (plugin && plugin.OG && plugin.OG[0] && plugin.OG[0].url) ||
+                "index.html";
+              var theme = "light";
+              try {
+                if (window.AscCommon && window.AscCommon.Dq && window.AscCommon.Dq.type) {
+                  theme = String(window.AscCommon.Dq.type);
+                }
+              } catch (err) {}
+              var ifr = document.createElement("iframe");
+              ifr.name = "iframe_" + g;
+              ifr.id = "iframe_" + g;
+              ifr.src = base + rel + "?lang=en&theme-type=" + theme;
+              ifr.style.cssText =
+                "position:absolute;top:-100px;left:0;width:10000px;height:100px;overflow:hidden;z-index:-1000";
+              ifr.setAttribute("frameBorder", "0");
+              ifr.setAttribute("allow", "autoplay");
+              document.body.appendChild(ifr);
+            }
+            path = "manual";
+          } catch (err) {
+            return "manual-err:" + (err && err.message ? err.message : String(err));
           }
-        } catch (err) {
-          return "manual-err:" + (err && err.message ? err.message : String(err));
         }
 
-        // Re-fire initialize after the plugin frame can listen — covers the case
-        // where the first initialize was dropped because GH/E4 was missing/bad.
+        // Drive plugin_init from the plugin side once Asc.plugin exists.
+        // Editor-side postMessage(initialize) is ignored until the plugin has
+        // set _initInternal (right before its own initialize ping).
         try {
-          if (hasGoodGh() && hasFrame()) {
-            var frameEl = document.getElementById("iframe_" + g);
-            var pingInit = function () {
+          if (!window.__jiAgentHs) window.__jiAgentHs = {};
+          if (!window.__jiAgentHs[g]) {
+            window.__jiAgentHs[g] = true;
+            var tries = 0;
+            var timer = setInterval(function () {
+              tries++;
+              var frameEl = document.getElementById("iframe_" + g);
+              if (!frameEl || !frameEl.contentWindow) {
+                if (tries > 80) clearInterval(timer);
+                return;
+              }
+              var pw = frameEl.contentWindow;
               try {
-                window.postMessage(
-                  JSON.stringify({ type: "initialize", guid: g }),
-                  window.location.origin,
-                );
+                if (!pw.Asc || !pw.Asc.plugin) {
+                  if (tries > 80) clearInterval(timer);
+                  return;
+                }
+                if (typeof pw.Asc.plugin.callCommand === "function") {
+                  clearInterval(timer);
+                  return;
+                }
+                if (typeof pw.startPluginApi === "function") {
+                  try {
+                    pw.Asc.plugin.isStarted = false;
+                    pw.startPluginApi();
+                  } catch (err) {}
+                  if (typeof pw.Asc.plugin.callCommand === "function") {
+                    clearInterval(timer);
+                    return;
+                  }
+                }
+                if (pw.Asc.plugin._initInternal) {
+                  pw.parent.postMessage(
+                    JSON.stringify({
+                      type: "initialize",
+                      guid: pw.Asc.plugin.guid || g,
+                    }),
+                    "*",
+                  );
+                }
               } catch (err) {}
-            };
-            if (frameEl) {
-              frameEl.addEventListener("load", function () {
-                setTimeout(pingInit, 50);
-                setTimeout(pingInit, 400);
-              });
-            }
-            setTimeout(pingInit, 200);
-            setTimeout(pingInit, 1000);
+              if (tries > 80) clearInterval(timer);
+            }, 250);
           }
         } catch (err) {}
 
         return [
+          path,
           hasGoodGh() ? "gh=1" : "gh=0",
           hasFrame() ? "frame=1" : "frame=0",
           "e4=" + (hasGoodGh() ? "ok" : "bad"),
