@@ -74,7 +74,7 @@ export const AGENT_PLUGIN_MANIFEST = {
   name: "Agent",
   nameLocale: { en: "Agent", "pt-BR": "Agente" },
   guid: AGENT_PLUGIN_GUID,
-  version: "1.2.5",
+  version: "1.2.6",
   variations: [
     {
       description: "Document tools for the host Agent",

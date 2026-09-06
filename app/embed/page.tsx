@@ -791,13 +791,14 @@ export default function EmbedPage() {
               postToHost({
                 type: "documentReady",
                 diag: collectPluginDiag({
-                  pluginReady: pluginCanReceive() || findPluginFrames().length > 0,
+                  // Frames alone are not enough — callCommand may still be missing.
+                  pluginReady: pluginCanReceive(),
                   forceRun: forceRun ?? forceResult,
                 }),
               });
             };
-            const pluginLive = () =>
-              pluginCanReceive() || findPluginFrames().length > 0;
+            // Agent tools need Asc.plugin.callCommand (ready ping), not just iframe_asc.*.
+            const pluginLive = () => pluginCanReceive();
             if (pluginLive()) {
               finish();
               return;
@@ -822,6 +823,12 @@ export default function EmbedPage() {
               forceResult = forceAgentPluginRun();
               console.warn("[embed] forceAgentPluginRun@5s:", forceResult);
             }, 5_000);
+            // Keep nudging while waiting for the Agent ready ping (callCommand).
+            window.setTimeout(() => {
+              if (finished || pluginLive()) return;
+              forceResult = forceAgentPluginRun();
+              console.warn("[embed] forceAgentPluginRun@15s:", forceResult);
+            }, 15_000);
             // Safety: never fatal-error the human editor. After 45s still notify
             // so Agent tools can surface a clear timeout instead of hanging forever.
             window.setTimeout(() => {

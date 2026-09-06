@@ -815,57 +815,39 @@
     handle(data)
   }
 
-  function install() {
-    if (!install.listening) {
-      install.listening = true
-      window.addEventListener("message", onHostMessage)
-    }
-    if (!window.Asc || !window.Asc.plugin) {
-      install.tries = (install.tries || 0) + 1
-      if (install.tries > 200) return
-      window.setTimeout(install, 100)
-      return
-    }
-
-    // OnlyOffice adds callCommand inside window.startPluginApi(), which runs on
-    // the editor's "init" message. Hook init so we never advertise ready early,
-    // and force-start the API if the editor skipped it (third-party /embed).
-    var prevInit = window.Asc.plugin.init
-    window.Asc.plugin.init = function () {
-      ensurePluginApi()
-      if (typeof prevInit === "function" && prevInit !== window.Asc.plugin.init) {
-        try {
-          prevInit.apply(this, arguments)
-        } catch (err) {}
-      }
-      attachHandlersAndReady()
-    }
-    window.Asc.plugin.button = function () {}
-
-    if (typeof window.Asc.plugin.callCommand === "function") {
-      attachHandlersAndReady()
-      return
-    }
-
-    // Asc.plugin exists but API not started yet — keep polling briefly.
-    install.apiTries = (install.apiTries || 0) + 1
-    if (install.apiTries <= 100) {
-      ensurePluginApi()
-      if (typeof window.Asc.plugin.callCommand === "function") {
-        attachHandlersAndReady()
-        return
-      }
-      window.setTimeout(install, 100)
-    }
-  }
-
   function ensurePluginApi() {
     try {
+      if (!window.Asc || !window.Asc.plugin) return
       if (typeof window.Asc.plugin.callCommand === "function") return
       if (typeof window.startPluginApi === "function") {
-        window.Asc.plugin.isStarted = false
-        window.startPluginApi()
+        try {
+          window.Asc.plugin.isStarted = false
+          window.startPluginApi()
+        } catch (err) {}
         window.Asc.plugin.isStarted = true
+        return
+      }
+      // plugin_init never arrived — re-request the editor handshake.
+      var guid = window.Asc.plugin.guid
+      if (!guid) return
+      var payload = { type: "initialize", guid: guid }
+      try {
+        if (window.Asc.plugin.windowID) payload.windowID = window.Asc.plugin.windowID
+      } catch (err) {}
+      var raw = JSON.stringify(payload)
+      var win = window
+      var hops = 0
+      while (win && hops < 4) {
+        try {
+          win.parent && win.parent !== win && win.parent.postMessage(raw, "*")
+        } catch (err) {}
+        try {
+          if (!win.parent || win.parent === win) break
+          win = win.parent
+        } catch (err) {
+          break
+        }
+        hops++
       }
     } catch (err) {}
   }
@@ -887,8 +869,56 @@
     reply("ready", {
       ok: true,
       hasCallCommand: true,
-      hasExecuteMethod: typeof window.Asc.plugin.executeMethod === "function"
+      hasExecuteMethod: typeof window.Asc.plugin.executeMethod === "function",
+      hasStartApi: typeof window.startPluginApi === "function"
     })
+  }
+
+  function install() {
+    if (!install.listening) {
+      install.listening = true
+      window.addEventListener("message", onHostMessage)
+    }
+    if (!window.Asc || !window.Asc.plugin) {
+      install.tries = (install.tries || 0) + 1
+      if (install.tries > 200) return
+      window.setTimeout(install, 100)
+      return
+    }
+
+    if (!install.hookedInit) {
+      install.hookedInit = true
+      // OnlyOffice adds callCommand inside window.startPluginApi(), which runs on
+      // the editor's "init" message. Hook init so we never advertise ready early,
+      // and force-start the API if the editor skipped it (third-party /embed).
+      var prevInit = window.Asc.plugin.init
+      window.Asc.plugin.init = function () {
+        ensurePluginApi()
+        if (typeof prevInit === "function" && prevInit !== window.Asc.plugin.init) {
+          try {
+            prevInit.apply(this, arguments)
+          } catch (err) {}
+        }
+        attachHandlersAndReady()
+      }
+      window.Asc.plugin.button = function () {}
+    }
+
+    if (typeof window.Asc.plugin.callCommand === "function") {
+      attachHandlersAndReady()
+      return
+    }
+
+    // Asc.plugin exists but API not started yet — keep polling.
+    install.apiTries = (install.apiTries || 0) + 1
+    ensurePluginApi()
+    if (typeof window.Asc.plugin.callCommand === "function") {
+      attachHandlersAndReady()
+      return
+    }
+    if (install.apiTries <= 150) {
+      window.setTimeout(install, 200)
+    }
   }
 
   install()
