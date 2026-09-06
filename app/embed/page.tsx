@@ -455,20 +455,33 @@ export default function EmbedPage() {
               postToHost({ type: "documentReady" });
               return;
             }
-            // Prefer waiting briefly for the Agent ready ping, but never kill the
-            // human editor with a fatal error — that left a sad-document pane.
-            const started = Date.now();
-            const finish = () => postToHost({ type: "documentReady" });
-            if (pluginCanReceive()) {
+            // Host already shows the UI on appReady. Only advertise documentReady
+            // once the Agent plugin can receive commands — an early soft ready made
+            // the workspace bind tools while iframe_asc.* never existed, then
+            // retries remounted the host and hit the 45s handshake sad-pane.
+            let finished = false;
+            const finish = () => {
+              if (finished) return;
+              finished = true;
+              postToHost({ type: "documentReady" });
+            };
+            const pluginLive = () =>
+              pluginCanReceive() || findPluginFrames().length > 0;
+            if (pluginLive()) {
               finish();
               return;
             }
             const tick = window.setInterval(() => {
-              if (pluginCanReceive() || Date.now() - started > 8_000) {
-                window.clearInterval(tick);
-                finish();
-              }
+              if (!pluginLive()) return;
+              window.clearInterval(tick);
+              finish();
             }, 200);
+            // Safety: never fatal-error the human editor. After 45s still notify
+            // so Agent tools can surface a clear timeout instead of hanging forever.
+            window.setTimeout(() => {
+              window.clearInterval(tick);
+              finish();
+            }, 45_000);
           },
           onDocumentStateChange: (e: { data: boolean }) => {
             if (e.data) {
