@@ -98,10 +98,11 @@ RUN cp "./v${DS_VERSION}-${HASH}/web-apps/apps/api/documents/api.js.tpl" \
 
 # public/v9.3* is dockerignored (huge OO tree). Bake Agent autostart list here so
 # DocsAPI's sync plugins.json XHR works even when the embed XHR proxy loses the race.
+# Use an absolute URL — path-only entries are resolved under /v9.3.1-2/ and 404.
 RUN printf '%s\n' \
   '{' \
   '  "url": "",' \
-  '  "pluginsData": ["/office-plugins/agent/config.json"],' \
+  '  "pluginsData": ["https://editor.app.br/office-plugins/agent/config.json"],' \
   '  "autostart": ["asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}"]' \
   '}' \
   > "./v${DS_VERSION}-${HASH}/plugins.json"
