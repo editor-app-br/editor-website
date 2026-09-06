@@ -826,17 +826,70 @@
       window.setTimeout(install, 100)
       return
     }
+
+    // OnlyOffice adds callCommand inside window.startPluginApi(), which runs on
+    // the editor's "init" message. Hook init so we never advertise ready early,
+    // and force-start the API if the editor skipped it (third-party /embed).
+    var prevInit = window.Asc.plugin.init
     window.Asc.plugin.init = function () {
-      window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
-      window.Asc.plugin.onExternalPluginMessage = handle
-      window.Asc.plugin.event_onKeyDown = onEditorKey
-      try {
-        window.Asc.plugin.attachEvent("onKeyDown", onEditorKey)
-        // Do not attach onTargetPositionChanged → callCommand (WASM dies after minutes).
-      } catch (err) {}
-      reply("ready", { ok: true })
+      ensurePluginApi()
+      if (typeof prevInit === "function" && prevInit !== window.Asc.plugin.init) {
+        try {
+          prevInit.apply(this, arguments)
+        } catch (err) {}
+      }
+      attachHandlersAndReady()
     }
     window.Asc.plugin.button = function () {}
+
+    if (typeof window.Asc.plugin.callCommand === "function") {
+      attachHandlersAndReady()
+      return
+    }
+
+    // Asc.plugin exists but API not started yet — keep polling briefly.
+    install.apiTries = (install.apiTries || 0) + 1
+    if (install.apiTries <= 100) {
+      ensurePluginApi()
+      if (typeof window.Asc.plugin.callCommand === "function") {
+        attachHandlersAndReady()
+        return
+      }
+      window.setTimeout(install, 100)
+    }
   }
+
+  function ensurePluginApi() {
+    try {
+      if (typeof window.Asc.plugin.callCommand === "function") return
+      if (typeof window.startPluginApi === "function") {
+        window.Asc.plugin.isStarted = false
+        window.startPluginApi()
+        window.Asc.plugin.isStarted = true
+      }
+    } catch (err) {}
+  }
+
+  function attachHandlersAndReady() {
+    if (install.readySent) return
+    if (typeof window.Asc.plugin.callCommand !== "function") {
+      // Still missing — do not lie to the host that the Agent can run commands.
+      return
+    }
+    install.readySent = true
+    window.Asc.plugin.attachEvent("onExternalPluginMessage", handle)
+    window.Asc.plugin.onExternalPluginMessage = handle
+    window.Asc.plugin.event_onKeyDown = onEditorKey
+    try {
+      window.Asc.plugin.attachEvent("onKeyDown", onEditorKey)
+      // Do not attach onTargetPositionChanged → callCommand (WASM dies after minutes).
+    } catch (err) {}
+    reply("ready", {
+      ok: true,
+      hasCallCommand: true,
+      hasExecuteMethod: typeof window.Asc.plugin.executeMethod === "function"
+    })
+  }
+
   install()
 })()
