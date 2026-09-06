@@ -57,16 +57,29 @@ type PluginsController = {
   appOptions?: { canPlugins?: boolean; isEdit?: boolean };
 };
 
+type AscPluginRunObject = {
+  K9?: string;
+  E4?: { setAttribute?: (k: string, v: unknown) => void; serialize?: () => string };
+  $na?: number;
+  yzd?: boolean;
+  y5b?: boolean;
+  Bsa?: boolean;
+};
+
 type AscPluginManager = {
   plugins?: unknown[];
   e2?: Record<string, AscPluginEntry | undefined>;
-  GH?: Record<string, { K9?: string } | undefined>;
+  /** runnedPluginsMap — required for plugin_init / callCommand handshake */
+  GH?: Record<string, AscPluginRunObject | undefined>;
   SNb?: unknown;
   f9i?: boolean;
   path?: string;
-  wm?: (guid: string, variation: number, data: unknown, force?: boolean) => void;
+  wm?: (guid: string, variation: number, data: unknown, isOnlyResize?: boolean) => void;
   ZDi?: (plugin: AscPluginEntry, variation: number) => boolean;
   show?: (guid: string) => void;
+  close?: (guid: string) => void;
+  eOa?: (guid: string) => AscPluginEntry | undefined;
+  Anc?: (data: unknown) => void;
 };
 
 type AscPluginEntry = {
@@ -88,7 +101,13 @@ type FrameEditorWindow = Window & {
       t7?: AscPluginManager;
     };
     CPlugin?: new () => { deserialize: (raw: unknown) => void };
+    /** Minified CPluginData used as GH[guid].E4 (must have serialize). */
+    Ngf?: new () => {
+      setAttribute: (k: string, v: unknown) => void;
+      serialize: () => string;
+    };
   };
+  AscCommon?: { Dq?: { type?: string } };
   DE?: {
     getController?: (name: string) => PluginsController | undefined;
   };
@@ -161,53 +180,170 @@ function countAgentPluginFrames(doc: Document | null | undefined): number {
   return seen.size;
 }
 
-/** Mirror OnlyOffice show() for invisible plugins when wm() still refuses. */
-function injectAgentPluginIframe(
-  win: FrameEditorWindow,
-  doc: Document,
-  mgr: AscPluginManager,
-): string {
-  const id = agentPluginFrameId();
-  if (doc.getElementById(id)) return "exists";
+/**
+ * Ensure Agent is in g_asc_plugins.GH (runnedPluginsMap) with a real CPluginData
+ * as E4, then create the iframe via show().
+ *
+ * A DOM stub for E4 was wrong: initialize may still send plugin_init, but
+ * initialize_internal → init needs E4.serialize(), so callCommand never lands.
+ * All of this must run inside frameEditor (Asc.Ngf / Array realm).
+ */
+function ensureAgentPluginRun(win: FrameEditorWindow): string {
+  const origin = location.origin;
+  return String(
+    (win as Window & { eval: (code: string) => unknown }).eval(`
+      (function () {
+        var g = ${JSON.stringify(AGENT_PLUGIN_GUID)};
+        var origin = ${JSON.stringify(origin)};
+        var mgr = window.g_asc_plugins;
+        if (!mgr) return "no-mgr";
+        if (!mgr.e2 || !mgr.e2[g]) return "no-e2";
+        mgr.SNb = null;
 
-  const plugin = mgr.e2?.[AGENT_PLUGIN_GUID];
-  const variation = plugin?.OG?.[0];
-  const baseUrl =
-    (plugin?.$M && plugin.$M.length > 0 ? plugin.$M : null) ||
-    `${location.origin}/office-plugins/agent/`;
-  const relUrl = variation?.url || "index.html";
-  const lang = "en";
-  let theme = "light";
-  try {
-    const dq = (win as unknown as { AscCommon?: { Dq?: { type?: string } } }).AscCommon?.Dq;
-    if (dq?.type) theme = String(dq.type);
-  } catch {
-    /* ignore */
-  }
+        function hasFrame() {
+          return !!document.getElementById("iframe_" + g);
+        }
+        function hasGoodGh() {
+          var ro = mgr.GH && mgr.GH[g];
+          return !!(
+            ro &&
+            ro.E4 &&
+            typeof ro.E4.serialize === "function" &&
+            typeof ro.E4.setAttribute === "function"
+          );
+        }
 
-  // GH entry is required: plugins.js "initialize" is ignored without it.
-  if (!mgr.GH) mgr.GH = {};
-  if (!mgr.GH[AGENT_PLUGIN_GUID]) {
-    const stub = doc.createElement("span");
-    stub.setAttribute("guid", AGENT_PLUGIN_GUID);
-    mgr.GH[AGENT_PLUGIN_GUID] = {
-      K9: id,
-    };
-    (mgr.GH[AGENT_PLUGIN_GUID] as { E4?: HTMLElement; $na?: number; yzd?: boolean }).E4 = stub;
-    (mgr.GH[AGENT_PLUGIN_GUID] as { $na?: number }).$na = 0;
-    (mgr.GH[AGENT_PLUGIN_GUID] as { yzd?: boolean }).yzd = false;
-  }
+        // Other non-system plugins make wm queue+return when f9i is false.
+        try {
+          for (var id in mgr.GH) {
+            if (id === g) continue;
+            var entry = mgr.e2[id];
+            if (
+              entry &&
+              typeof entry.y5b === "function" &&
+              !entry.y5b() &&
+              typeof mgr.close === "function"
+            ) {
+              mgr.close(id);
+            }
+          }
+          mgr.SNb = null;
+        } catch (err) {}
 
-  const frame = doc.createElement("iframe");
-  frame.name = id;
-  frame.id = id;
-  frame.src = `${baseUrl}${relUrl}?lang=${lang}&theme-type=${theme}`;
-  frame.style.cssText =
-    "position:absolute;top:-100px;left:0;width:10000px;height:100px;overflow:hidden;z-index:-1000";
-  frame.setAttribute("frameBorder", "0");
-  frame.setAttribute("allow", "autoplay");
-  doc.body.appendChild(frame);
-  return doc.getElementById(id) ? "injected" : "inject-failed";
+        // 4th arg is isOnlyResize (skips the "close other plugin" early return).
+        try {
+          if (typeof mgr.wm === "function" && !hasGoodGh()) {
+            mgr.wm(g, 0, "", true);
+          }
+        } catch (err) {}
+
+        if (hasGoodGh() && hasFrame()) return "wm-ok";
+
+        try {
+          var Ctor = window.Asc && window.Asc.Ngf;
+          if (!Ctor) return "no-Ngf";
+          var startData = new Ctor();
+          startData.setAttribute("guid", g);
+          if (typeof mgr.Anc === "function") mgr.Anc(startData);
+          try {
+            if (window.AscCommon && window.AscCommon.Dq) {
+              startData.setAttribute("theme", window.AscCommon.Dq);
+            }
+          } catch (err) {}
+
+          var plugin = typeof mgr.eOa === "function" ? mgr.eOa(g) : mgr.e2[g];
+          var isSystem = false;
+          try {
+            isSystem = !!(mgr.e2[g].y5b && mgr.e2[g].y5b());
+          } catch (err) {}
+
+          if (!mgr.GH) mgr.GH = {};
+          // Drop a broken prior entry (DOM stub from older fallbacks).
+          if (mgr.GH[g] && !hasGoodGh()) {
+            try {
+              var bad = document.getElementById("iframe_" + g);
+              if (bad && bad.parentNode) bad.parentNode.removeChild(bad);
+            } catch (err) {}
+            delete mgr.GH[g];
+          }
+
+          if (!mgr.GH[g]) {
+            mgr.GH[g] = {
+              K9: "iframe_" + g,
+              $na: 0,
+              yzd: false,
+              y5b: isSystem,
+              E4: startData,
+              n0b: -1,
+              $Ze: false,
+              Bsa: !!(plugin && plugin.Bsa),
+            };
+          }
+
+          if (!hasFrame() && typeof mgr.show === "function") {
+            mgr.show(g);
+          }
+
+          if (!hasFrame()) {
+            var base =
+              (plugin && plugin.$M && String(plugin.$M).length
+                ? plugin.$M
+                : origin + "/office-plugins/agent/");
+            var rel =
+              (plugin && plugin.OG && plugin.OG[0] && plugin.OG[0].url) ||
+              "index.html";
+            var theme = "light";
+            try {
+              if (window.AscCommon && window.AscCommon.Dq && window.AscCommon.Dq.type) {
+                theme = String(window.AscCommon.Dq.type);
+              }
+            } catch (err) {}
+            var ifr = document.createElement("iframe");
+            ifr.name = "iframe_" + g;
+            ifr.id = "iframe_" + g;
+            ifr.src = base + rel + "?lang=en&theme-type=" + theme;
+            ifr.style.cssText =
+              "position:absolute;top:-100px;left:0;width:10000px;height:100px;overflow:hidden;z-index:-1000";
+            ifr.setAttribute("frameBorder", "0");
+            ifr.setAttribute("allow", "autoplay");
+            document.body.appendChild(ifr);
+          }
+        } catch (err) {
+          return "manual-err:" + (err && err.message ? err.message : String(err));
+        }
+
+        // Re-fire initialize after the plugin frame can listen — covers the case
+        // where the first initialize was dropped because GH/E4 was missing/bad.
+        try {
+          if (hasGoodGh() && hasFrame()) {
+            var frameEl = document.getElementById("iframe_" + g);
+            var pingInit = function () {
+              try {
+                window.postMessage(
+                  JSON.stringify({ type: "initialize", guid: g }),
+                  window.location.origin,
+                );
+              } catch (err) {}
+            };
+            if (frameEl) {
+              frameEl.addEventListener("load", function () {
+                setTimeout(pingInit, 50);
+                setTimeout(pingInit, 400);
+              });
+            }
+            setTimeout(pingInit, 200);
+            setTimeout(pingInit, 1000);
+          }
+        } catch (err) {}
+
+        return [
+          hasGoodGh() ? "gh=1" : "gh=0",
+          hasFrame() ? "frame=1" : "frame=0",
+          "e4=" + (hasGoodGh() ? "ok" : "bad"),
+        ].join(",");
+      })()
+    `),
+  );
 }
 
 function forceAgentPluginRun(): string {
@@ -273,9 +409,12 @@ function forceAgentPluginRun(): string {
         try {
           mgr.SNb = null;
           if (typeof mgr.wm === "function") mgr.wm(g, 0, "", true);
+          var ro = mgr.GH && mgr.GH[g];
+          var e4ok = !!(ro && ro.E4 && typeof ro.E4.serialize === "function");
           return [
             "e2=" + (mgr.e2 && mgr.e2[g] ? 1 : 0),
-            "gh=" + (mgr.GH && mgr.GH[g] ? 1 : 0),
+            "gh=" + (ro ? 1 : 0),
+            "e4=" + (e4ok ? "ok" : "bad"),
             "frame=" + (document.getElementById("iframe_" + g) ? 1 : 0)
           ].join(",");
         } catch (err) {
@@ -296,10 +435,10 @@ function forceAgentPluginRun(): string {
       `frames=${countAgentPluginFrames(doc)}`,
     );
 
-    if (countAgentPluginFrames(doc) === 0 && mgr && doc) {
-      parts.push(`fallback=${injectAgentPluginIframe(win, doc, mgr)}`);
-      parts.push(`frames2=${countAgentPluginFrames(doc)}`);
-    }
+    // Always ensure a valid GH.E4 + iframe — wm often no-ops under third-party
+    // /embed, and a DOM-stub E4 leaves callCommand permanently missing.
+    parts.push(`ensure=${ensureAgentPluginRun(win)}`);
+    parts.push(`frames2=${countAgentPluginFrames(doc)}`);
 
     parts.push(`gPlugins=${mgr?.plugins?.length ?? "?"}`);
     return parts.join(",");
