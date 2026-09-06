@@ -73,6 +73,8 @@ export type EmbedPluginDiag = {
   pluginFrames: number;
   pluginReady: boolean;
   forceRun?: string;
+  /** Snapshot of Agent iframe Asc.plugin handshake inside frameEditor. */
+  pluginHs?: string;
 };
 
 export type EditorToHostMessage =

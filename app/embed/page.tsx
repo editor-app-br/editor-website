@@ -138,14 +138,51 @@ function collectPluginDiag(extra?: Partial<EmbedPluginDiag>): EmbedPluginDiag {
   const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
   let frameDoc = false;
   let pluginFrames = 0;
+  let pluginHs = "no-frame";
   try {
     const doc = iframe?.contentDocument || null;
+    const win = iframe?.contentWindow as FrameEditorWindow | null;
     frameDoc = !!doc;
     if (doc) {
       pluginFrames = countAgentPluginFrames(doc);
     }
-  } catch {
+    if (win) {
+      pluginHs = String(
+        (win as Window & { eval: (code: string) => unknown }).eval(`
+          (function () {
+            var g = ${JSON.stringify(AGENT_PLUGIN_GUID)};
+            var st = window.__jiAgentHsStatus && window.__jiAgentHsStatus[g];
+            var f = document.getElementById("iframe_" + g);
+            if (!f) return "missing-frame|" + (st || "");
+            try {
+              var pw = f.contentWindow;
+              if (!pw) return "no-cw|" + (st || "");
+              var href = "";
+              try { href = String(pw.location && pw.location.href || "").slice(-60); } catch (e) { href = "href-err"; }
+              var hasAsc = !!(pw.Asc && pw.Asc.plugin);
+              var cc = hasAsc && typeof pw.Asc.plugin.callCommand === "function";
+              var spa = typeof pw.startPluginApi === "function";
+              var ii = hasAsc && !!pw.Asc.plugin._initInternal;
+              var guid = hasAsc ? String(pw.Asc.plugin.guid || "") : "";
+              return [
+                "href=" + href,
+                "asc=" + (hasAsc ? 1 : 0),
+                "cc=" + (cc ? 1 : 0),
+                "spa=" + (spa ? 1 : 0),
+                "ii=" + (ii ? 1 : 0),
+                "guid=" + guid,
+                "st=" + (st || "")
+              ].join(",");
+            } catch (err) {
+              return "access-err:" + (err && err.message ? err.message : String(err)) + "|" + (st || "");
+            }
+          })()
+        `),
+      );
+    }
+  } catch (err) {
     frameDoc = false;
+    pluginHs = err instanceof Error ? `diag-err:${err.message}` : "diag-err";
   }
   return {
     crossOriginIsolated: window.crossOriginIsolated === true,
@@ -156,6 +193,7 @@ function collectPluginDiag(extra?: Partial<EmbedPluginDiag>): EmbedPluginDiag {
     frameDoc,
     pluginFrames,
     pluginReady: false,
+    pluginHs,
     ...extra,
   };
 }
@@ -316,53 +354,67 @@ function ensureAgentPluginRun(win: FrameEditorWindow): string {
         }
 
         // Drive plugin_init from the plugin side once Asc.plugin exists.
-        // Editor-side postMessage(initialize) is ignored until the plugin has
-        // set _initInternal (right before its own initialize ping).
+        // Always (re)start the poll — earlier attempts may have timed out.
         try {
-          if (!window.__jiAgentHs) window.__jiAgentHs = {};
-          if (!window.__jiAgentHs[g]) {
-            window.__jiAgentHs[g] = true;
-            var tries = 0;
-            var timer = setInterval(function () {
-              tries++;
-              var frameEl = document.getElementById("iframe_" + g);
-              if (!frameEl || !frameEl.contentWindow) {
-                if (tries > 80) clearInterval(timer);
+          if (!window.__jiAgentHsStatus) window.__jiAgentHsStatus = {};
+          window.__jiAgentHsStatus[g] = "polling";
+          if (window.__jiAgentHsTimer && window.__jiAgentHsTimer[g]) {
+            clearInterval(window.__jiAgentHsTimer[g]);
+          }
+          if (!window.__jiAgentHsTimer) window.__jiAgentHsTimer = {};
+          var tries = 0;
+          window.__jiAgentHsTimer[g] = setInterval(function () {
+            tries++;
+            var frameEl = document.getElementById("iframe_" + g);
+            if (!frameEl || !frameEl.contentWindow) {
+              window.__jiAgentHsStatus[g] = "no-cw@" + tries;
+              if (tries > 120) clearInterval(window.__jiAgentHsTimer[g]);
+              return;
+            }
+            var pw = frameEl.contentWindow;
+            try {
+              if (!pw.Asc || !pw.Asc.plugin) {
+                window.__jiAgentHsStatus[g] = "no-asc@" + tries;
+                if (tries > 120) clearInterval(window.__jiAgentHsTimer[g]);
                 return;
               }
-              var pw = frameEl.contentWindow;
-              try {
-                if (!pw.Asc || !pw.Asc.plugin) {
-                  if (tries > 80) clearInterval(timer);
-                  return;
+              if (typeof pw.Asc.plugin.callCommand === "function") {
+                window.__jiAgentHsStatus[g] = "ready@" + tries;
+                clearInterval(window.__jiAgentHsTimer[g]);
+                return;
+              }
+              if (typeof pw.startPluginApi === "function") {
+                window.__jiAgentHsStatus[g] = "spa@" + tries;
+                try {
+                  pw.Asc.plugin.isStarted = false;
+                  pw.startPluginApi();
+                } catch (err) {
+                  window.__jiAgentHsStatus[g] = "spa-err:" + (err && err.message ? err.message : String(err));
                 }
                 if (typeof pw.Asc.plugin.callCommand === "function") {
-                  clearInterval(timer);
+                  window.__jiAgentHsStatus[g] = "ready-spa@" + tries;
+                  clearInterval(window.__jiAgentHsTimer[g]);
                   return;
                 }
-                if (typeof pw.startPluginApi === "function") {
-                  try {
-                    pw.Asc.plugin.isStarted = false;
-                    pw.startPluginApi();
-                  } catch (err) {}
-                  if (typeof pw.Asc.plugin.callCommand === "function") {
-                    clearInterval(timer);
-                    return;
-                  }
-                }
-                if (pw.Asc.plugin._initInternal) {
-                  pw.parent.postMessage(
-                    JSON.stringify({
-                      type: "initialize",
-                      guid: pw.Asc.plugin.guid || g,
-                    }),
-                    "*",
-                  );
-                }
-              } catch (err) {}
-              if (tries > 80) clearInterval(timer);
-            }, 250);
-          }
+              }
+              if (pw.Asc.plugin._initInternal) {
+                window.__jiAgentHsStatus[g] = "resent@" + tries;
+                pw.parent.postMessage(
+                  JSON.stringify({
+                    type: "initialize",
+                    guid: pw.Asc.plugin.guid || g,
+                  }),
+                  "*",
+                );
+              } else {
+                window.__jiAgentHsStatus[g] = "wait-ii@" + tries;
+              }
+            } catch (err) {
+              window.__jiAgentHsStatus[g] =
+                "access-err@" + tries + ":" + (err && err.message ? err.message : String(err));
+            }
+            if (tries > 120) clearInterval(window.__jiAgentHsTimer[g]);
+          }, 250);
         } catch (err) {}
 
         return [
@@ -370,6 +422,7 @@ function ensureAgentPluginRun(win: FrameEditorWindow): string {
           hasGoodGh() ? "gh=1" : "gh=0",
           hasFrame() ? "frame=1" : "frame=0",
           "e4=" + (hasGoodGh() ? "ok" : "bad"),
+          "hs=" + (window.__jiAgentHsStatus && window.__jiAgentHsStatus[g] ? window.__jiAgentHsStatus[g] : ""),
         ].join(",");
       })()
     `),
