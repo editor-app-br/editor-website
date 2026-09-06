@@ -112,6 +112,11 @@ function collectPluginDiag(extra?: Partial<EmbedPluginDiag>): EmbedPluginDiag {
   };
 }
 
+/** Build values inside frameEditor's realm — parent Arrays fail `instanceof Array` there. */
+function frameEvalJson<T>(win: Window, value: unknown): T {
+  return (win as Window & { eval: (code: string) => T }).eval(`(${JSON.stringify(value)})`);
+}
+
 function forceAgentPluginRun(): string {
   const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
   const win = iframe?.contentWindow as FrameEditorWindow | null | undefined;
@@ -119,20 +124,25 @@ function forceAgentPluginRun(): string {
   try {
     const pluginsCtrl = win.DE?.getController?.("Common.Controllers.Plugins");
     const baseUrl = `${location.origin}/office-plugins/agent/`;
-    const manifest = { ...AGENT_PLUGIN_MANIFEST, baseUrl };
+    // Must be frame-local: OnlyOffice parsePlugins uses `pluginsdata instanceof Array`
+    // against frameEditor's Array ctor; a parent-window array always fails that check,
+    // leaves canPlugins=false, and never calls asc_pluginsRegister.
+    const manifestList = frameEvalJson<unknown[]>(win, [
+      { ...AGENT_PLUGIN_MANIFEST, baseUrl },
+    ]);
     const parts: string[] = [];
 
     if (pluginsCtrl) {
       parts.push("ctrl");
       // Register (or refresh) the Agent manifest, then autostart.
       if (typeof pluginsCtrl.onPluginsInit === "function") {
-        pluginsCtrl.onPluginsInit([manifest], true);
+        pluginsCtrl.onPluginsInit(manifestList, true);
         parts.push("init");
       } else if (typeof pluginsCtrl.parsePlugins === "function") {
-        pluginsCtrl.parsePlugins([manifest], false, true, true);
+        pluginsCtrl.parsePlugins(manifestList as unknown[], false, true, true);
         parts.push("parse");
       }
-      pluginsCtrl.autostart = [AGENT_PLUGIN_GUID];
+      pluginsCtrl.autostart = frameEvalJson<string[]>(win, [AGENT_PLUGIN_GUID]);
       if (typeof pluginsCtrl.runAutoStartPlugins === "function") {
         pluginsCtrl.runAutoStartPlugins();
         parts.push("autostart");
