@@ -334,7 +334,18 @@ export default function EmbedPage() {
         if (tryPatch()) observer.disconnect();
       });
       observer.observe(root, { childList: true, subtree: true });
-      window.setTimeout(() => observer.disconnect(), 30_000);
+      // Sync plugins.json XHR races ahead of MutationObserver; poll hard for 2s.
+      let n = 0;
+      const poll = window.setInterval(() => {
+        if (tryPatch() || ++n > 200) {
+          window.clearInterval(poll);
+          if (tryPatch()) observer.disconnect();
+        }
+      }, 10);
+      window.setTimeout(() => {
+        window.clearInterval(poll);
+        observer.disconnect();
+      }, 30_000);
     };
 
     const destroyEditor = () => {
@@ -366,6 +377,10 @@ export default function EmbedPage() {
       server.setClient({
         buildVersion: window.DocsAPI?.DocEditor?.version() || "9.3.0",
       });
+
+      // Start observing before DocEditor creates frameEditor — otherwise the
+      // first sync plugins.json XHR misses our proxy and the Agent never mounts.
+      watchEditorFrame();
 
       const editor = new window.DocsAPI!.DocEditor("placeholder", {
         document: {
@@ -503,8 +518,8 @@ export default function EmbedPage() {
       });
 
       editorRef.current = editor;
-      // Do not wait for onAppReady: the host handshake is 45s, and agent plugin
-      // load can delay that callback. Patch as soon as frameEditor exists.
+      // watchEditorFrame already started before DocEditor; patch again in case
+      // the frame appeared synchronously during construction.
       watchEditorFrame();
       setLoading(false);
       postToHost({ type: "appReady" });
