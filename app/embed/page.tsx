@@ -57,17 +57,42 @@ type PluginsController = {
   appOptions?: { canPlugins?: boolean; isEdit?: boolean };
 };
 
+type AscPluginManager = {
+  plugins?: unknown[];
+  e2?: Record<string, AscPluginEntry | undefined>;
+  GH?: Record<string, { K9?: string } | undefined>;
+  SNb?: unknown;
+  f9i?: boolean;
+  path?: string;
+  wm?: (guid: string, variation: number, data: unknown, force?: boolean) => void;
+  ZDi?: (plugin: AscPluginEntry, variation: number) => boolean;
+  show?: (guid: string) => void;
+};
+
+type AscPluginEntry = {
+  Dx?: string;
+  $M?: string;
+  Bsa?: boolean;
+  OG?: Array<{
+    url?: string;
+    Bcc?: string[];
+    get_Visual?: () => boolean;
+  }>;
+  y5b?: () => boolean;
+};
+
 type FrameEditorWindow = Window & {
   Asc?: {
-    editor?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
+    editor?: {
+      asc_pluginRun?: (guid: string, variation: number, data: string) => void;
+      t7?: AscPluginManager;
+    };
+    CPlugin?: new () => { deserialize: (raw: unknown) => void };
   };
   DE?: {
     getController?: (name: string) => PluginsController | undefined;
   };
-  g_asc_plugins?: {
-    plugins?: unknown[];
-    runnedPluginsMap?: Record<string, unknown>;
-  };
+  g_asc_plugins?: AscPluginManager;
 };
 
 function topIsSameOrigin(): boolean {
@@ -117,9 +142,76 @@ function frameEvalJson<T>(win: Window, value: unknown): T {
   return (win as Window & { eval: (code: string) => T }).eval(`(${JSON.stringify(value)})`);
 }
 
+function agentPluginFrameId(): string {
+  return `iframe_${AGENT_PLUGIN_GUID}`;
+}
+
+function countAgentPluginFrames(doc: Document | null | undefined): number {
+  if (!doc) return 0;
+  return [
+    doc.getElementById(agentPluginFrameId()),
+    ...Array.from(doc.querySelectorAll("iframe")),
+  ].filter((node) => {
+    if (!(node instanceof HTMLIFrameElement)) return false;
+    const id = node.id || "";
+    const src = node.getAttribute("src") || "";
+    return id.includes("7E4A1C90") || src.includes("/office-plugins/agent");
+  }).length;
+}
+
+/** Mirror OnlyOffice show() for invisible plugins when wm() still refuses. */
+function injectAgentPluginIframe(
+  win: FrameEditorWindow,
+  doc: Document,
+  mgr: AscPluginManager,
+): string {
+  const id = agentPluginFrameId();
+  if (doc.getElementById(id)) return "exists";
+
+  const plugin = mgr.e2?.[AGENT_PLUGIN_GUID];
+  const variation = plugin?.OG?.[0];
+  const baseUrl =
+    (plugin?.$M && plugin.$M.length > 0 ? plugin.$M : null) ||
+    `${location.origin}/office-plugins/agent/`;
+  const relUrl = variation?.url || "index.html";
+  const lang = "en";
+  let theme = "light";
+  try {
+    const dq = (win as unknown as { AscCommon?: { Dq?: { type?: string } } }).AscCommon?.Dq;
+    if (dq?.type) theme = String(dq.type);
+  } catch {
+    /* ignore */
+  }
+
+  // GH entry is required: plugins.js "initialize" is ignored without it.
+  if (!mgr.GH) mgr.GH = {};
+  if (!mgr.GH[AGENT_PLUGIN_GUID]) {
+    const stub = doc.createElement("span");
+    stub.setAttribute("guid", AGENT_PLUGIN_GUID);
+    mgr.GH[AGENT_PLUGIN_GUID] = {
+      K9: id,
+    };
+    (mgr.GH[AGENT_PLUGIN_GUID] as { E4?: HTMLElement; $na?: number; yzd?: boolean }).E4 = stub;
+    (mgr.GH[AGENT_PLUGIN_GUID] as { $na?: number }).$na = 0;
+    (mgr.GH[AGENT_PLUGIN_GUID] as { yzd?: boolean }).yzd = false;
+  }
+
+  const frame = doc.createElement("iframe");
+  frame.name = id;
+  frame.id = id;
+  frame.src = `${baseUrl}${relUrl}?lang=${lang}&theme-type=${theme}`;
+  frame.style.cssText =
+    "position:absolute;top:-100px;left:0;width:10000px;height:100px;overflow:hidden;z-index:-1000";
+  frame.setAttribute("frameBorder", "0");
+  frame.setAttribute("allow", "autoplay");
+  doc.body.appendChild(frame);
+  return doc.getElementById(id) ? "injected" : "inject-failed";
+}
+
 function forceAgentPluginRun(): string {
   const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
   const win = iframe?.contentWindow as FrameEditorWindow | null | undefined;
+  const doc = iframe?.contentDocument || null;
   if (!win) return "no-frame";
   try {
     const pluginsCtrl = win.DE?.getController?.("Common.Controllers.Plugins");
@@ -134,7 +226,6 @@ function forceAgentPluginRun(): string {
 
     if (pluginsCtrl) {
       parts.push("ctrl");
-      // Register (or refresh) the Agent manifest, then autostart.
       if (typeof pluginsCtrl.onPluginsInit === "function") {
         pluginsCtrl.onPluginsInit(manifestList, true);
         parts.push("init");
@@ -154,22 +245,51 @@ function forceAgentPluginRun(): string {
       parts.push("no-ctrl");
     }
 
-    const run =
-      pluginsCtrl?.api?.asc_pluginRun ||
-      win.Asc?.editor?.asc_pluginRun ||
-      win.DE?.getController?.("Main")?.api?.asc_pluginRun;
-    if (typeof run === "function") {
-      run.call(win.Asc?.editor || pluginsCtrl?.api || win, AGENT_PLUGIN_GUID, 0, "");
+    const mgr: AscPluginManager | undefined =
+      win.g_asc_plugins || win.Asc?.editor?.t7 || undefined;
+    // Stuck SNb makes every later wm() a no-op.
+    if (mgr && mgr.SNb) {
+      mgr.SNb = null;
+      parts.push("clearSNb");
+    }
+
+    const api = win.Asc?.editor || pluginsCtrl?.api;
+    const run = api?.asc_pluginRun;
+    if (typeof run === "function" && api) {
+      run.call(api, AGENT_PLUGIN_GUID, 0, "");
       parts.push("run");
     } else {
       parts.push("no-api");
     }
 
-    const gCount = win.g_asc_plugins?.plugins?.length;
-    const runned = win.g_asc_plugins?.runnedPluginsMap
-      ? Object.keys(win.g_asc_plugins.runnedPluginsMap).length
-      : "?";
-    parts.push(`gPlugins=${gCount ?? "?"}`, `runned=${runned}`);
+    // asc_pluginRun is `this.t7 && this.t7.wm(...)` — silent no-op if t7 missing.
+    // Call wm directly with force=true to skip the "close other plugin" early return.
+    if (mgr && typeof mgr.wm === "function") {
+      mgr.wm(AGENT_PLUGIN_GUID, 0, "", true);
+      parts.push("wm");
+    } else {
+      parts.push("no-wm");
+    }
+
+    const plugin = mgr?.e2?.[AGENT_PLUGIN_GUID];
+    const bcc = plugin?.OG?.[0]?.Bcc;
+    const zdi =
+      mgr && plugin && typeof mgr.ZDi === "function" ? mgr.ZDi(plugin, 0) : null;
+    parts.push(
+      `e2=${plugin ? 1 : 0}`,
+      `gh=${mgr?.GH?.[AGENT_PLUGIN_GUID] ? 1 : 0}`,
+      `bcc=${Array.isArray(bcc) ? bcc.join("|") : "?"}`,
+      `base=${plugin?.$M ? "1" : "0"}`,
+      `zdi=${zdi === null ? "?" : String(zdi)}`,
+      `frames=${countAgentPluginFrames(doc)}`,
+    );
+
+    if (countAgentPluginFrames(doc) === 0 && mgr && doc) {
+      parts.push(`fallback=${injectAgentPluginIframe(win, doc, mgr)}`);
+      parts.push(`frames2=${countAgentPluginFrames(doc)}`);
+    }
+
+    parts.push(`gPlugins=${mgr?.plugins?.length ?? "?"}`);
     return parts.join(",");
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
