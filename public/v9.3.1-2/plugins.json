@@ -1,0 +1,9 @@
+{
+  "url": "",
+  "pluginsData": [
+    "/office-plugins/agent/config.json"
+  ],
+  "autostart": [
+    "asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}"
+  ]
+}
