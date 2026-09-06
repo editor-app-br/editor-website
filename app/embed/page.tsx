@@ -43,16 +43,31 @@ type PluginHost = {
   onExternalPluginMessage?: (data: Record<string, unknown>) => void;
 };
 
+type PluginsController = {
+  onPluginsInit?: (plugins: unknown, fromManager?: boolean) => void;
+  parsePlugins?: (
+    plugins: unknown[],
+    uiCustomize?: boolean,
+    forceUpdate?: boolean,
+    fromManager?: boolean,
+  ) => void;
+  runAutoStartPlugins?: () => void;
+  autostart?: string[];
+  api?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
+  appOptions?: { canPlugins?: boolean; isEdit?: boolean };
+};
+
 type FrameEditorWindow = Window & {
   Asc?: {
     editor?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
   };
   DE?: {
-    getController?: (name: string) => {
-      api?: { asc_pluginRun?: (guid: string, variation: number, data: string) => void };
-    };
+    getController?: (name: string) => PluginsController | undefined;
   };
-  g_asc_plugins?: { plugins?: unknown[] };
+  g_asc_plugins?: {
+    plugins?: unknown[];
+    runnedPluginsMap?: Record<string, unknown>;
+  };
 };
 
 function topIsSameOrigin(): boolean {
@@ -102,15 +117,50 @@ function forceAgentPluginRun(): string {
   const win = iframe?.contentWindow as FrameEditorWindow | null | undefined;
   if (!win) return "no-frame";
   try {
-    const run =
-      win.Asc?.editor?.asc_pluginRun ||
-      win.DE?.getController?.("Main")?.api?.asc_pluginRun ||
-      win.DE?.getController?.("Common")?.api?.asc_pluginRun;
-    if (typeof run !== "function") {
-      return `no-api plugins=${win.g_asc_plugins?.plugins?.length ?? "?"}`;
+    const pluginsCtrl = win.DE?.getController?.("Common.Controllers.Plugins");
+    const baseUrl = `${location.origin}/office-plugins/agent/`;
+    const manifest = { ...AGENT_PLUGIN_MANIFEST, baseUrl };
+    const parts: string[] = [];
+
+    if (pluginsCtrl) {
+      parts.push("ctrl");
+      // Register (or refresh) the Agent manifest, then autostart.
+      if (typeof pluginsCtrl.onPluginsInit === "function") {
+        pluginsCtrl.onPluginsInit([manifest], true);
+        parts.push("init");
+      } else if (typeof pluginsCtrl.parsePlugins === "function") {
+        pluginsCtrl.parsePlugins([manifest], false, true, true);
+        parts.push("parse");
+      }
+      pluginsCtrl.autostart = [AGENT_PLUGIN_GUID];
+      if (typeof pluginsCtrl.runAutoStartPlugins === "function") {
+        pluginsCtrl.runAutoStartPlugins();
+        parts.push("autostart");
+      }
+      if (pluginsCtrl.appOptions) {
+        parts.push(`canPlugins=${String(pluginsCtrl.appOptions.canPlugins)}`);
+      }
+    } else {
+      parts.push("no-ctrl");
     }
-    run.call(win.Asc?.editor || win, AGENT_PLUGIN_GUID, 0, "");
-    return "ran";
+
+    const run =
+      pluginsCtrl?.api?.asc_pluginRun ||
+      win.Asc?.editor?.asc_pluginRun ||
+      win.DE?.getController?.("Main")?.api?.asc_pluginRun;
+    if (typeof run === "function") {
+      run.call(win.Asc?.editor || pluginsCtrl?.api || win, AGENT_PLUGIN_GUID, 0, "");
+      parts.push("run");
+    } else {
+      parts.push("no-api");
+    }
+
+    const gCount = win.g_asc_plugins?.plugins?.length;
+    const runned = win.g_asc_plugins?.runnedPluginsMap
+      ? Object.keys(win.g_asc_plugins.runnedPluginsMap).length
+      : "?";
+    parts.push(`gPlugins=${gCount ?? "?"}`, `runned=${runned}`);
+    return parts.join(",");
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }
@@ -592,6 +642,7 @@ export default function EmbedPage() {
             // retries remounted the host and hit the 45s handshake sad-pane.
             let finished = false;
             let forceAttempted = false;
+            let forceResult: string | undefined;
             const finish = (forceRun?: string) => {
               if (finished) return;
               finished = true;
@@ -599,7 +650,7 @@ export default function EmbedPage() {
                 type: "documentReady",
                 diag: collectPluginDiag({
                   pluginReady: pluginCanReceive() || findPluginFrames().length > 0,
-                  forceRun,
+                  forceRun: forceRun ?? forceResult,
                 }),
               });
             };
@@ -612,21 +663,28 @@ export default function EmbedPage() {
             const tick = window.setInterval(() => {
               if (!pluginLive()) return;
               window.clearInterval(tick);
-              finish(forceAttempted ? "ran" : undefined);
+              finish(forceAttempted ? forceResult || "ran" : undefined);
             }, 200);
             // Third-party /embed (workspace): OnlyOffice autostart sometimes never
-            // mounts iframe_asc.* — nudge asc_pluginRun once after plugins settle.
+            // mounts iframe_asc.* — register Agent + nudge asc_pluginRun.
             window.setTimeout(() => {
               if (finished || forceAttempted || pluginLive()) return;
               forceAttempted = true;
-              const result = forceAgentPluginRun();
-              console.warn("[embed] forceAgentPluginRun@1.5s:", result);
+              forceResult = forceAgentPluginRun();
+              console.warn("[embed] forceAgentPluginRun@1.5s:", forceResult);
             }, 1_500);
+            // Second attempt if the controller was not ready yet.
+            window.setTimeout(() => {
+              if (finished || pluginLive()) return;
+              forceAttempted = true;
+              forceResult = forceAgentPluginRun();
+              console.warn("[embed] forceAgentPluginRun@5s:", forceResult);
+            }, 5_000);
             // Safety: never fatal-error the human editor. After 45s still notify
             // so Agent tools can surface a clear timeout instead of hanging forever.
             window.setTimeout(() => {
               window.clearInterval(tick);
-              finish(forceAttempted ? "timeout-after-force" : "timeout");
+              finish(forceAttempted ? `timeout-after-force:${forceResult || "?"}` : "timeout");
             }, 45_000);
           },
           onDocumentStateChange: (e: { data: boolean }) => {
