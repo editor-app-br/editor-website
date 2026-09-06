@@ -95,6 +95,18 @@ type FrameEditorWindow = Window & {
   g_asc_plugins?: AscPluginManager;
 };
 
+/** Cross-realm safe: frameEditor nodes fail `instanceof HTMLIFrameElement` in embed. */
+function isHtmlIframe(node: Element | null | undefined): node is HTMLIFrameElement {
+  return !!node && node.tagName === "IFRAME";
+}
+
+function isAgentPluginFrame(node: Element | null | undefined): node is HTMLIFrameElement {
+  if (!isHtmlIframe(node)) return false;
+  const id = node.id || "";
+  const src = node.getAttribute("src") || "";
+  return id.includes("7E4A1C90") || src.includes("/office-plugins/agent");
+}
+
 function topIsSameOrigin(): boolean {
   try {
     return window.top === window || window.top?.location.origin === window.location.origin;
@@ -111,15 +123,7 @@ function collectPluginDiag(extra?: Partial<EmbedPluginDiag>): EmbedPluginDiag {
     const doc = iframe?.contentDocument || null;
     frameDoc = !!doc;
     if (doc) {
-      pluginFrames = [
-        doc.getElementById(`iframe_${AGENT_PLUGIN_GUID}`),
-        ...Array.from(doc.querySelectorAll("iframe")),
-      ].filter((node) => {
-        if (!(node instanceof HTMLIFrameElement)) return false;
-        const id = node.id || "";
-        const src = node.getAttribute("src") || "";
-        return id.includes("7E4A1C90") || src.includes("/office-plugins/agent");
-      }).length;
+      pluginFrames = countAgentPluginFrames(doc);
     }
   } catch {
     frameDoc = false;
@@ -148,15 +152,13 @@ function agentPluginFrameId(): string {
 
 function countAgentPluginFrames(doc: Document | null | undefined): number {
   if (!doc) return 0;
-  return [
-    doc.getElementById(agentPluginFrameId()),
-    ...Array.from(doc.querySelectorAll("iframe")),
-  ].filter((node) => {
-    if (!(node instanceof HTMLIFrameElement)) return false;
-    const id = node.id || "";
-    const src = node.getAttribute("src") || "";
-    return id.includes("7E4A1C90") || src.includes("/office-plugins/agent");
-  }).length;
+  const seen = new Set<Element>();
+  const direct = doc.getElementById(agentPluginFrameId());
+  if (direct) seen.add(direct);
+  for (const node of Array.from(doc.querySelectorAll("iframe"))) {
+    if (isAgentPluginFrame(node)) seen.add(node);
+  }
+  return seen.size;
 }
 
 /** Mirror OnlyOffice show() for invisible plugins when wm() still refuses. */
@@ -262,22 +264,32 @@ function forceAgentPluginRun(): string {
       parts.push("no-api");
     }
 
-    // asc_pluginRun is `this.t7 && this.t7.wm(...)` — silent no-op if t7 missing.
-    // Call wm directly with force=true to skip the "close other plugin" early return.
-    if (mgr && typeof mgr.wm === "function") {
-      mgr.wm(AGENT_PLUGIN_GUID, 0, "", true);
-      parts.push("wm");
-    } else {
-      parts.push("no-wm");
-    }
+    // Run wm entirely inside frameEditor so `this` / closures match the SDK.
+    const wmDiag = (win as Window & { eval: (code: string) => unknown }).eval(`
+      (function(){
+        var g = ${JSON.stringify(AGENT_PLUGIN_GUID)};
+        var mgr = window.g_asc_plugins;
+        if (!mgr) return "no-mgr";
+        try {
+          mgr.SNb = null;
+          if (typeof mgr.wm === "function") mgr.wm(g, 0, "", true);
+          return [
+            "e2=" + (mgr.e2 && mgr.e2[g] ? 1 : 0),
+            "gh=" + (mgr.GH && mgr.GH[g] ? 1 : 0),
+            "frame=" + (document.getElementById("iframe_" + g) ? 1 : 0)
+          ].join(",");
+        } catch (err) {
+          return "wm-err:" + (err && err.message ? err.message : String(err));
+        }
+      })()
+    `);
+    parts.push(`inframe:${String(wmDiag)}`);
 
     const plugin = mgr?.e2?.[AGENT_PLUGIN_GUID];
     const bcc = plugin?.OG?.[0]?.Bcc;
     const zdi =
       mgr && plugin && typeof mgr.ZDi === "function" ? mgr.ZDi(plugin, 0) : null;
     parts.push(
-      `e2=${plugin ? 1 : 0}`,
-      `gh=${mgr?.GH?.[AGENT_PLUGIN_GUID] ? 1 : 0}`,
       `bcc=${Array.isArray(bcc) ? bcc.join("|") : "?"}`,
       `base=${plugin?.$M ? "1" : "0"}`,
       `zdi=${zdi === null ? "?" : String(zdi)}`,
@@ -882,7 +894,8 @@ export default function EmbedPage() {
       ];
       const seen = new Set<HTMLIFrameElement>();
       for (const node of nodes) {
-        if (!(node instanceof HTMLIFrameElement)) continue;
+        // Do not use instanceof — frameEditor nodes are a different realm.
+        if (!isHtmlIframe(node)) continue;
         const id = node.id || "";
         const src = node.getAttribute("src") || "";
         if (
