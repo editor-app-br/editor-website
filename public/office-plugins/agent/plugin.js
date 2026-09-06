@@ -815,6 +815,8 @@
     handle(data)
   }
 
+  var AGENT_GUID = "asc.{7E4A1C90-2B6D-4F11-9A33-8C0E5D71B2A4}"
+
   function ensurePluginApi() {
     try {
       if (!window.Asc || !window.Asc.plugin) return
@@ -827,13 +829,20 @@
         window.Asc.plugin.isStarted = true
         return
       }
-      // plugin_init never arrived — re-request the editor handshake.
+      // plugins.js loads ./config.json then posts {type:"initialize"}. Under some
+      // third-party /embed embeds that XHR never completes (guid stays empty,
+      // _initInternal stays false) so plugin_init / callCommand never arrive.
+      if (!window.Asc.plugin.guid) {
+        window.Asc.plugin.guid = AGENT_GUID
+      }
       var guid = window.Asc.plugin.guid
       if (!guid) return
       var payload = { type: "initialize", guid: guid }
       try {
         if (window.Asc.plugin.windowID) payload.windowID = window.Asc.plugin.windowID
       } catch (err) {}
+      // Mark ready to receive plugin_init even if config.json onload never fired.
+      window.Asc.plugin._initInternal = true
       var raw = JSON.stringify(payload)
       var win = window
       var hops = 0
