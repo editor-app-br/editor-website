@@ -81,6 +81,7 @@ export default function Page() {
       fetchProxy.use((request: Request) => {
         return server.handleRequest(request);
       });
+      server.setObjectUrlFactory((blob) => win.URL.createObjectURL(blob));
       Object.assign(win, {
         io: io,
         XMLHttpRequest: xhr,

@@ -33,12 +33,51 @@ function randomId() {
   return Math.random().toString(36).substring(2, 9);
 }
 
-function getUrl(data: Uint8Array, type?: string) {
-  const blob = new Blob([data as Uint8Array<ArrayBuffer>], {
+type ObjectUrlFactory = (blob: Blob) => string;
+
+function bytesToBlob(data: Uint8Array, type?: string) {
+  return new Blob([data as Uint8Array<ArrayBuffer>], {
     type: type || "application/octet-stream",
   });
-  return URL.createObjectURL(blob);
 }
+
+function extFromMime(mime: string) {
+  const subtype = (mime.split("/")[1] || "png").toLowerCase();
+  if (subtype === "jpeg") return "jpg";
+  if (subtype === "svg+xml") return "svg";
+  return subtype.replace(/[^a-z0-9]+/g, "") || "png";
+}
+
+function dataUrlToBytes(src: string): { bytes: Uint8Array; mime: string; ext: string } | null {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/i.exec(src);
+  if (!match) return null;
+  const mime = match[1] || "image/png";
+  const isBase64 = Boolean(match[2]);
+  const payload = match[3] || "";
+  try {
+    const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return { bytes, mime, ext: extFromMime(mime) };
+  } catch {
+    return null;
+  }
+}
+
+type OpenDocumentCommand = {
+  c?: string;
+  data?: unknown;
+  saveindex?: number;
+};
+
+type SocketMessage = {
+  type?: string;
+  message?: OpenDocumentCommand;
+  c?: string;
+  data?: unknown;
+  saveindex?: number;
+  block?: string;
+};
 
 export class EditorServer {
   private id = "";
@@ -64,6 +103,7 @@ export class EditorServer {
 
   private downloadId: string = "";
   private downloadParts: Uint8Array[] = [];
+  private objectUrlFactory: ObjectUrlFactory = (blob) => URL.createObjectURL(blob);
 
   private options: ServerOptions = {};
 
@@ -123,7 +163,7 @@ export class EditorServer {
     }
 
     this.fsMap.set("Editor.bin", binData);
-    this.urlsMap.set("Editor.bin", getUrl(binData));
+    this.urlsMap.set("Editor.bin", this.createObjectUrl(binData));
 
     return {
       id: this.id,
@@ -205,18 +245,67 @@ export class EditorServer {
       this.urlsMap.forEach((url) => URL.revokeObjectURL(url));
     }
     this.fsMap.set("Editor.bin", output);
-    this.urlsMap.set("Editor.bin", getUrl(output));
+    this.urlsMap.set("Editor.bin", this.createObjectUrl(output));
     for (const name in media) {
       this.addMedia(name, media[name]);
     }
   }
 
-  private addMedia(name: string, data: Uint8Array) {
+  /** Create blob: URLs in frameEditor so COEP/isolation can load pasted images. */
+  setObjectUrlFactory(factory: ObjectUrlFactory) {
+    this.objectUrlFactory = factory;
+  }
+
+  private createObjectUrl(data: Uint8Array, type?: string) {
+    return this.objectUrlFactory(bytesToBlob(data, type));
+  }
+
+  private addMedia(name: string, data: Uint8Array, type?: string) {
     const pathname = "media/" + name;
-    const url = getUrl(data);
+    const url = this.createObjectUrl(data, type);
     this.fsMap.set(pathname, data);
     this.urlsMap.set(pathname, url);
     return url;
+  }
+
+  private localizePastedImage(src: string, index: number) {
+    const fallbackName = `image${Date.now()}_${index}`;
+    if (typeof src !== "string" || !src) {
+      return { url: "error", path: "error" };
+    }
+    if (src.startsWith("data:")) {
+      const parsed = dataUrlToBytes(src);
+      if (!parsed) return { url: "error", path: "error" };
+      const filename = `${fallbackName}.${parsed.ext}`;
+      const url = this.addMedia(filename, parsed.bytes, parsed.mime);
+      return { url, path: "media/" + filename };
+    }
+    // blob:/http(s) already loadable in the editor iframe — keep the URL.
+    const ext =
+      /\.(png|jpe?g|gif|webp|bmp|svg)(?:$|\?)/i.exec(src)?.[1]?.toLowerCase() || "png";
+    const filename = `${fallbackName}.${ext}`;
+    const path = "media/" + filename;
+    this.urlsMap.set(path, src);
+    return { url: src, path };
+  }
+
+  private handleImgUrls(command: OpenDocumentCommand) {
+    const images = Array.isArray(command.data) ? command.data : [];
+    const startIndex = Number(command.saveindex) || 0;
+    const urls = images.map((src, i) =>
+      this.localizePastedImage(typeof src === "string" ? src : "", startIndex + i + 1),
+    );
+    this.send({
+      type: "documentOpen",
+      data: {
+        type: "imgurls",
+        status: "ok",
+        data: {
+          urls,
+          error: 0,
+        },
+      },
+    });
   }
 
   setClient(info: Partial<typeof this.client>) {
@@ -289,13 +378,20 @@ export class EditorServer {
     this.socket.server.emit("message", ...msg);
   }
 
-  async handleMessage(msg: Record<string, string>, ...args: unknown[]) {
+  async handleMessage(msg: SocketMessage, ...args: unknown[]) {
     console.log("[ws] << ", msg, args);
 
     const { send, sessionId, participants, user, client } = this;
     const type =
       typeof msg === "object" && msg && "type" in msg ? msg.type : null;
     switch (type) {
+      case "openDocument": {
+        const command = msg.message || msg;
+        if (command?.c === "imgurls") {
+          this.handleImgUrls(command);
+        }
+        break;
+      }
       case "auth":
         const changes: unknown[] = [];
         send({
@@ -373,35 +469,37 @@ export class EditorServer {
           time: +new Date(),
         });
         break;
-      case "getLock":
+      case "getLock": {
+        const block = msg.block || "";
         send({
           type: "getLock",
           locks: {
-            [msg.block]: {
+            [block]: {
               time: +new Date(),
               user: user?.id,
-              block: msg.block,
+              block,
             },
           },
         });
         send({
           type: "releaseLock",
           locks: {
-            [msg.block]: {
+            [block]: {
               time: +new Date(),
               user: user?.id,
-              block: msg.block,
+              block,
             },
           },
         });
         break;
+      }
     }
   }
 
   async handleRequest(req: Request) {
     const u = new URL(req.url);
 
-    const { id: key, send } = this;
+    const { send } = this;
 
     if (u.pathname.includes("/downloadas/")) {
       try {
@@ -542,12 +640,13 @@ export class EditorServer {
       }
     }
 
-    if (u.pathname.endsWith("/upload/" + key)) {
+    if (/\/upload\/[^/]+$/.test(u.pathname)) {
       const buffer = await req.arrayBuffer();
       const data = new Uint8Array(buffer);
-      const filename = Date.now() + ".png";
+      const mime = req.headers.get("content-type") || "image/png";
+      const filename = `${Date.now()}.${extFromMime(mime)}`;
       const pathname = "media/" + filename;
-      const url = this.addMedia(filename, data);
+      const url = this.addMedia(filename, data, mime);
       return Response.json({ [pathname]: url });
     }
 

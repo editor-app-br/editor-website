@@ -205,22 +205,30 @@ export function createXHRProxy(
     private async _tryMiddlewares(): Promise<boolean> {
       // Create Request object
       let request: Request;
+      const reqInit: RequestInit = {
+        method: this._requestMethod,
+        headers: this._requestHeaders,
+        body: this._requestBody as BodyInit,
+        mode: "cors",
+      };
+      if (this.withCredentials) {
+        reqInit.credentials = "include";
+      }
+
       try {
-        const reqInit: RequestInit = {
-          method: this._requestMethod,
-          headers: this._requestHeaders,
-          body: this._requestBody as BodyInit,
-          mode: "cors",
-        };
-
-        if (this.withCredentials) {
-          reqInit.credentials = "include";
-        }
-
         request = new scope.Request(this._requestUrl, reqInit);
       } catch (e) {
-        // Unable to create Request, do not use middleware
-        return false;
+        // File/Blob + Content-Type can throw in some browsers. Retry without it.
+        try {
+          const headers = new Headers(this._requestHeaders);
+          headers.delete("content-type");
+          request = new scope.Request(this._requestUrl, {
+            ...reqInit,
+            headers,
+          });
+        } catch {
+          return false;
+        }
       }
 
       // Run middleware

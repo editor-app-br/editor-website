@@ -790,6 +790,7 @@ export default function EmbedPage() {
         return null;
       });
       fetchProxy.use((request: Request) => server.handleRequest(request));
+      server.setObjectUrlFactory((blob) => win.URL.createObjectURL(blob));
 
       Object.assign(win, {
         io,
