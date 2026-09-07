@@ -39,6 +39,125 @@
       .replace(/\r/g, "\n")
   }
 
+  var INLINE_TAG_FLAGS = {
+    b: "bold",
+    strong: "bold",
+    i: "italic",
+    em: "italic",
+    u: "underline",
+    s: "strike",
+    strike: "strike",
+    del: "strike"
+  }
+
+  function decodeHtmlEntities(text) {
+    return String(text)
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/gi, "'")
+  }
+
+  function parseInlineMarkup(text) {
+    var source = String(text == null ? "" : text)
+    var tagRe = /<\/?(b|strong|i|em|u|s|strike|del|br|p)\b[^>]*\/?>/gi
+    var flags = { bold: 0, italic: 0, underline: 0, strike: 0 }
+    var paragraphs = [[]]
+    var current = paragraphs[0]
+    var lastIndex = 0
+    var hasMarkup = false
+    var match
+
+    function formatOf() {
+      return {
+        bold: flags.bold > 0,
+        italic: flags.italic > 0,
+        underline: flags.underline > 0,
+        strike: flags.strike > 0
+      }
+    }
+
+    function appendRun(chunk) {
+      if (!chunk) return
+      var decoded = decodeHtmlEntities(chunk)
+      if (!decoded) return
+      var fmt = formatOf()
+      var last = current[current.length - 1]
+      if (
+        last &&
+        last.text != null &&
+        last.break !== "line" &&
+        last.bold === fmt.bold &&
+        last.italic === fmt.italic &&
+        last.underline === fmt.underline &&
+        last.strike === fmt.strike
+      ) {
+        last.text += decoded
+        return
+      }
+      current.push({
+        text: decoded,
+        bold: fmt.bold,
+        italic: fmt.italic,
+        underline: fmt.underline,
+        strike: fmt.strike
+      })
+    }
+
+    function appendText(raw) {
+      if (!raw) return
+      var parts = raw.split("\n")
+      var i
+      for (i = 0; i < parts.length; i++) {
+        if (i > 0) {
+          paragraphs.push([])
+          current = paragraphs[paragraphs.length - 1]
+        }
+        appendRun(parts[i])
+      }
+    }
+
+    while ((match = tagRe.exec(source))) {
+      hasMarkup = true
+      appendText(source.slice(lastIndex, match.index))
+      lastIndex = tagRe.lastIndex
+      var token = match[0]
+      var name = match[1].toLowerCase()
+      var closing = token.charAt(1) === "/"
+      if (name === "br") {
+        current.push({ break: "line" })
+        continue
+      }
+      if (name === "p") {
+        if (current.length) {
+          paragraphs.push([])
+          current = paragraphs[paragraphs.length - 1]
+        }
+        continue
+      }
+      var key = INLINE_TAG_FLAGS[name]
+      if (!key) continue
+      if (closing) {
+        if (flags[key] > 0) flags[key]--
+      } else {
+        flags[key]++
+      }
+    }
+    appendText(source.slice(lastIndex))
+    while (paragraphs.length > 1 && paragraphs[paragraphs.length - 1].length === 0) paragraphs.pop()
+    return { hasMarkup: hasMarkup, paragraphs: paragraphs }
+  }
+
+  function paragraphsFromPayload(payload, text) {
+    if (payload && Array.isArray(payload.paragraphs) && payload.paragraphs.length) {
+      return { hasMarkup: true, paragraphs: payload.paragraphs }
+    }
+    return parseInlineMarkup(text)
+  }
+
   function setScope(values) {
     if (!window.Asc) window.Asc = {}
     // Never replace Asc.scope: callCommand does JSON.stringify(window.Asc.scope).
@@ -250,9 +369,11 @@
         return
       }
 
-      if (type === "insert_text" || type === "type") {
+      if (type === "insert_text" || type === "type" || type === "replace_selection") {
         var insert = normalizeNewlines(payload.text || "")
+        var markup = paragraphsFromPayload(payload, insert)
         var needsFormat = !!(
+          markup.hasMarkup ||
           payload.font ||
           payload.size ||
           payload.bold != null ||
@@ -270,12 +391,13 @@
         if (!needsFormat) {
           runMethod("PasteText", [insert], function (_value, error) {
             if (error) reply(requestId, null, error)
-            else reply(requestId, { inserted: insert.length })
+            else reply(requestId, type === "replace_selection" ? { replaced: true } : { inserted: insert.length })
           })
           return
         }
         setScope({
           text: insert,
+          paragraphs: markup.paragraphs,
           kind: type,
           bold: payload.bold,
           italic: payload.italic,
@@ -292,6 +414,34 @@
         })
         callDoc(function () {
           var s = Asc.scope
+          function applyRunFormat(run, piece) {
+            if (!run) return
+            if ((piece && piece.bold === true) || s.bold === true) run.SetBold(true)
+            if ((piece && piece.italic === true) || s.italic === true) run.SetItalic(true)
+            if (((piece && piece.underline === true) || s.underline === true) && run.SetUnderline) {
+              run.SetUnderline("single")
+            }
+            if (((piece && piece.strike === true) || s.strike === true) && run.SetStrikeout) {
+              run.SetStrikeout(true)
+            }
+            if (s.font && run.SetFontFamily) run.SetFontFamily(s.font)
+            if (s.size && run.SetFontSize) run.SetFontSize(Number(s.size) * 2)
+            if (s.color && run.SetColor) run.SetColor(s.color.r, s.color.g, s.color.b)
+            if (s.highlight && run.SetHighlight) run.SetHighlight(s.highlight)
+          }
+          function plainFromParagraphs(blocks) {
+            var lines = []
+            var pi
+            for (pi = 0; pi < (blocks ? blocks.length : 0); pi++) {
+              var bits = []
+              var ri
+              for (ri = 0; ri < blocks[pi].length; ri++) {
+                if (blocks[pi][ri] && blocks[pi][ri].text) bits.push(blocks[pi][ri].text)
+              }
+              lines.push(bits.join(""))
+            }
+            return lines.join("\n")
+          }
           if (typeof Api.GetPresentation === "function" && typeof Api.GetDocument !== "function") {
             var pres = Api.GetPresentation()
             var slide = pres.GetCurrentSlide ? pres.GetCurrentSlide() : null
@@ -299,33 +449,43 @@
             var shape = typeof Api.CreateShape === "function" ? Api.CreateShape("rect", 100 * 36000, 40 * 36000) : null
             if (!shape) return false
             var box = shape.GetDocContent && shape.GetDocContent()
-            var para = box && box.GetElement ? box.GetElement(0) : null
-            if (para && para.AddText) para.AddText(s.text || "")
+            var slidePara = box && box.GetElement ? box.GetElement(0) : null
+            if (slidePara && slidePara.AddText) slidePara.AddText(plainFromParagraphs(s.paragraphs) || s.text || "")
             if (slide.AddObject) slide.AddObject(shape)
             return true
           }
           if (typeof Api.GetDocument !== "function") return false
           var doc = Api.GetDocument()
-          var lines = String(s.text || "").split("\n")
-          if (!lines.length) lines = [""]
+          var blocks = s.paragraphs
+          if (!blocks || !blocks.length) {
+            var lines = String(s.text || "").split("\n")
+            if (!lines.length) lines = [""]
+            blocks = []
+            var li
+            for (li = 0; li < lines.length; li++) blocks.push([{ text: lines[li] }])
+          }
           var paras = []
           var i
-          for (i = 0; i < lines.length; i++) {
-            var run = typeof Api.CreateRun === "function" ? Api.CreateRun() : null
-            if (run) {
-              run.AddText(lines[i])
-              if (s.bold === true) run.SetBold(true)
-              if (s.italic === true) run.SetItalic(true)
-              if (s.underline === true && run.SetUnderline) run.SetUnderline("single")
-              if (s.strike === true && run.SetStrikeout) run.SetStrikeout(true)
-              if (s.font && run.SetFontFamily) run.SetFontFamily(s.font)
-              if (s.size && run.SetFontSize) run.SetFontSize(Number(s.size) * 2)
-              if (s.color && run.SetColor) run.SetColor(s.color.r, s.color.g, s.color.b)
-              if (s.highlight && run.SetHighlight) run.SetHighlight(s.highlight)
-            }
+          for (i = 0; i < blocks.length; i++) {
             var para = Api.CreateParagraph()
-            if (run && para.AddElement) para.AddElement(run)
-            else if (para.AddText) para.AddText(lines[i])
+            var pieces = blocks[i] || []
+            var j
+            for (j = 0; j < pieces.length; j++) {
+              var piece = pieces[j] || {}
+              if (piece.break === "line") {
+                if (para.AddLineBreak) para.AddLineBreak()
+                continue
+              }
+              var run = typeof Api.CreateRun === "function" ? Api.CreateRun() : null
+              var chunk = piece.text == null ? "" : String(piece.text)
+              if (run) {
+                run.AddText(chunk)
+                applyRunFormat(run, piece)
+                if (para.AddElement) para.AddElement(run)
+              } else if (para.AddText) {
+                para.AddText(chunk)
+              }
+            }
             if (s.align && para.SetJc) para.SetJc(s.align)
             if (s.style && i === 0) {
               var style = doc.GetStyle(s.style)
@@ -345,15 +505,8 @@
           return true
         }, function (ok, error) {
           if (error) reply(requestId, null, error)
+          else if (type === "replace_selection") reply(requestId, { replaced: ok !== false })
           else reply(requestId, { inserted: insert.length, ok: ok !== false })
-        })
-        return
-      }
-
-      if (type === "replace_selection") {
-        runMethod("PasteText", [normalizeNewlines(payload.text || "")], function (_value, error) {
-          if (error) reply(requestId, null, error)
-          else reply(requestId, { replaced: true })
         })
         return
       }
