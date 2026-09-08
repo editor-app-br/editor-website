@@ -7,6 +7,47 @@
 var AVS_FILE_DOCUMENT_DOC = 0x0042;
 var AVS_FILE_CROSSPLATFORM_PDFA = 0x0209;
 var BASE_URL = self.location.origin + "/x2t/";
+var nativeFetch = self.fetch.bind(self);
+self.fetch = function (input, init) {
+  var url =
+    typeof input === "string"
+      ? input
+      : input && input.url
+        ? input.url
+        : String(input);
+  var href;
+  try {
+    href = new URL(url, self.location.origin).href;
+  } catch (err) {
+    return nativeFetch(input, init);
+  }
+  if (href.indexOf("/x2t/") === -1) return nativeFetch(input, init);
+  if (typeof caches === "undefined") return nativeFetch(input, init);
+  return caches
+    .match(href)
+    .then(function (hit) {
+      if (hit && hit.ok) return hit;
+      return nativeFetch(href, { credentials: "same-origin", cache: "reload" }).then(
+        function (resp) {
+          if (resp && resp.ok) {
+            caches.keys().then(function (keys) {
+              var name =
+                keys.filter(function (k) {
+                  return k.indexOf("editor-static-") === 0;
+                })[0] || "editor-static-x2t";
+              caches.open(name).then(function (cache) {
+                cache.put(href, resp.clone());
+              });
+            });
+          }
+          return resp;
+        },
+      );
+    })
+    .catch(function () {
+      return nativeFetch(input, init);
+    });
+};
 
 var x2t = null;
 var initPromise = null;

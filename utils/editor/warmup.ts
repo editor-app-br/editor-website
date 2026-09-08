@@ -1,5 +1,5 @@
 import { WARMUP_CACHE_PREFIX } from "@/utils/embed-protocol";
-import { API_JS, PRELOAD_HTML } from "@/utils/editor/utils";
+import { API_JS, getAppRoot, PRELOAD_HTML } from "@/utils/editor/utils";
 
 const X2T_ASSETS = ["/x2t/x2t.js", "/x2t/x2t.wasm"];
 
@@ -12,6 +12,8 @@ const EDITOR_SHELLS = [
 
 /** Must be present before DocsAPI can start reliably after a cold cache wipe. */
 const CRITICAL_RELATIVE = [API_JS, "/x2t/x2t.js", "/x2t/x2t.wasm"] as const;
+
+const FETCH_HOOK = "__jiEditorAssetFetch";
 
 function seedUrls(appRoot: string): string[] {
   const root = appRoot.replace(/\/$/, "");
@@ -31,9 +33,21 @@ export function warmupCacheName(appRoot: string): string {
   return `${WARMUP_CACHE_PREFIX}${appRoot.replace(/^\//, "")}`;
 }
 
+function cacheNameForUrl(url: string): string {
+  try {
+    const path = new URL(url, location.origin).pathname;
+    const match = path.match(/^\/(v[^/]+)\//);
+    if (match) return warmupCacheName(`/${match[1]}`);
+  } catch {
+    /* fall through */
+  }
+  return warmupCacheName(getAppRoot());
+}
+
 function isVersionedStatic(url: string): boolean {
   try {
     const path = new URL(url, location.origin).pathname;
+    if (path.endsWith("plugins.json")) return false;
     if (path.endsWith(".html")) {
       // Editor shells under /v* are safe to keep offline; skip generic HTML.
       return /^\/v[^/]+\//.test(path) || path.startsWith("/office-plugins/");
@@ -48,19 +62,89 @@ function isVersionedStatic(url: string): boolean {
   }
 }
 
+function allowCachedHtml(path: string): boolean {
+  return (
+    path.startsWith("/office-plugins/") ||
+    (/^\/v[^/]+\//.test(path) && path.endsWith(".html"))
+  );
+}
+
 async function putIfOk(cache: Cache, requestUrl: string): Promise<boolean> {
-  const response = await fetch(requestUrl, { credentials: "same-origin" });
+  // Bypass HTTP cache so a wiped Cache Storage entry is re-downloaded.
+  const response = await fetch(requestUrl, {
+    credentials: "same-origin",
+    cache: "reload",
+  });
   if (!response.ok) return false;
   const contentType = response.headers.get("content-type") || "";
   const path = new URL(requestUrl, location.origin).pathname;
-  const allowHtml =
-    path.startsWith("/office-plugins/") ||
-    (/^\/v[^/]+\//.test(path) && path.endsWith(".html"));
-  if (contentType.includes("text/html") && !allowHtml) {
+  if (contentType.includes("text/html") && !allowCachedHtml(path)) {
     return false;
   }
   await cache.put(requestUrl, response.clone());
   return true;
+}
+
+/** Cache Storage hit for a versioned editor asset, or null. */
+export async function matchEditorAsset(url: string): Promise<Response | null> {
+  if (typeof caches === "undefined" || !isVersionedStatic(url)) return null;
+  try {
+    const href = new URL(url, location.origin).href;
+    const hit = await caches.match(href);
+    return hit?.ok ? hit : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serve from Cache Storage, else download from this origin and recache.
+ * Used when an asset was deleted from Cache Storage.
+ */
+export async function fetchThroughEditorCache(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  nativeFetch: typeof fetch = fetch,
+): Promise<Response> {
+  const request = input instanceof Request && !init ? input : new Request(input, init);
+  if (request.method !== "GET" || !isVersionedStatic(request.url)) {
+    return nativeFetch(request);
+  }
+  const href = new URL(request.url, location.origin).href;
+  const cached = await matchEditorAsset(href);
+  if (cached) return cached;
+  try {
+    const response = await nativeFetch(
+      new Request(href, {
+        method: "GET",
+        credentials: request.credentials,
+        cache: "reload",
+      }),
+    );
+    if (response.ok && typeof caches !== "undefined") {
+      const path = new URL(href).pathname;
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("text/html") || allowCachedHtml(path)) {
+        const cache = await caches.open(cacheNameForUrl(href));
+        void cache.put(href, response.clone()).catch(() => undefined);
+      }
+    }
+    return response;
+  } catch (err) {
+    const fallback = await matchEditorAsset(href);
+    if (fallback) return fallback;
+    throw err;
+  }
+}
+
+/** Patch window.fetch so x2t WASM / same-origin assets refill Cache Storage on miss. */
+export function installEditorAssetFetchHook(target: Window = window): void {
+  const win = target as Window & { [FETCH_HOOK]?: boolean; fetch: typeof fetch };
+  if (win[FETCH_HOOK] || typeof win.fetch !== "function") return;
+  const native = win.fetch.bind(win);
+  win.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    fetchThroughEditorCache(input, init, native)) as typeof fetch;
+  win[FETCH_HOOK] = true;
 }
 
 export async function prefetchEditorAssets(
@@ -80,8 +164,10 @@ export async function prefetchEditorAssets(
     const results = await Promise.all(
       slice.map(async (path) => {
         try {
-          const ok = await putIfOk(cache, new URL(path, location.origin).href);
-          return ok;
+          const href = new URL(path, location.origin).href;
+          const existing = await caches.match(href);
+          if (existing?.ok) return true;
+          return await putIfOk(cache, href);
         } catch {
           return false;
         }
@@ -100,10 +186,12 @@ export async function isEditorCacheReady(appRoot: string): Promise<boolean> {
   if (typeof caches === "undefined") return false;
   const root = appRoot.replace(/\/$/, "");
   try {
-    const cache = await caches.open(warmupCacheName(appRoot));
     for (const rel of CRITICAL_RELATIVE) {
-      const href = new URL(rel.startsWith("/x2t/") ? rel : `${root}${rel}`, location.origin).href;
-      const hit = await cache.match(href);
+      const href = new URL(
+        rel.startsWith("/x2t/") ? rel : `${root}${rel}`,
+        location.origin,
+      ).href;
+      const hit = await caches.match(href);
       if (!hit || !hit.ok) return false;
     }
     return true;
@@ -128,41 +216,22 @@ export async function ensureEditorAssets(
   return { ready, cached: result.cached, failed: result.failed, skipped: false };
 }
 
-/** Load DocsAPI (or any script URL) from Cache Storage when present, else network. */
+/**
+ * Load DocsAPI with a real script URL. Blob URLs break OnlyOffice getBasePath()
+ * (`script.src` must match `api/documents/api.js`).
+ */
 export async function loadScriptCached(url: string): Promise<void> {
-  const tryLoad = (src: string, mark: string) =>
-    new Promise<void>((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = src;
-      script.dataset.jiSrc = mark;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error(`Failed to load script ${mark}`));
-      document.head.appendChild(script);
-    });
-
   if ((window as Window & { DocsAPI?: { DocEditor?: unknown } }).DocsAPI?.DocEditor) {
     return;
   }
-
-  try {
-    if (typeof caches !== "undefined") {
-      const hit = await caches.match(url);
-      if (hit?.ok) {
-        const blob = await hit.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        try {
-          await tryLoad(objectUrl, url);
-          URL.revokeObjectURL(objectUrl);
-          return;
-        } catch {
-          URL.revokeObjectURL(objectUrl);
-        }
-      }
-    }
-  } catch {
-    /* network path below */
-  }
-  await tryLoad(url, url);
+  await new Promise<void>((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = url;
+    script.dataset.jiSrc = url;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script ${url}`));
+    document.head.appendChild(script);
+  });
 }
 
 export function shouldPreserveEditorCache(name: string): boolean {

@@ -1,3 +1,4 @@
+import { fetchThroughEditorCache } from "./warmup";
 import type { XHRMiddleware } from "./xhr";
 
 export type FetchProxy = typeof fetch & {
@@ -42,7 +43,7 @@ export function createFetchProxy(
       return BaseFetch(request);
     }
 
-    return BaseFetch(request);
+    return fetchThroughEditorCache(request, undefined, BaseFetch);
   }) as FetchProxy;
 
   proxy.use = (middleware: XHRMiddleware) => {

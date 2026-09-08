@@ -1,3 +1,5 @@
+import { matchEditorAsset } from "./warmup";
+
 export interface XHRMiddleware {
   (request: Request): Response | null | Promise<Response | null>;
 }
@@ -237,6 +239,15 @@ export function createXHRProxy(
         if (response) {
           this._isMocked = true;
           await this._handleMockResponse(response);
+          return true;
+        }
+      }
+
+      if (this._requestMethod.toUpperCase() === "GET") {
+        const cached = await matchEditorAsset(request.url);
+        if (cached) {
+          this._isMocked = true;
+          await this._handleMockResponse(cached);
           return true;
         }
       }

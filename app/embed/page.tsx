@@ -23,7 +23,11 @@ import {
 } from "@/utils/embed-protocol";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
-import { ensureEditorAssets, loadScriptCached } from "@/utils/editor/warmup";
+import {
+  ensureEditorAssets,
+  installEditorAssetFetchHook,
+  loadScriptCached,
+} from "@/utils/editor/warmup";
 import {
   AGENT_PLUGIN_GUID,
   AGENT_PLUGIN_MANIFEST,
@@ -691,6 +695,7 @@ export default function EmbedPage() {
     setAppRoot(resolvedAppRoot);
     const apiUrl = resolvedAppRoot + API_JS;
     const isWarmup = searchParams.get("warmup") === "1";
+    installEditorAssetFetchHook(window);
 
     if (isWarmup) {
       setWarmupLabel("Preparando cache do editor…");
