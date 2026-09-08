@@ -134,6 +134,8 @@ export type EditorToHostMessage =
       type: "warmed";
       cached: number;
       failed: number;
+      /** Critical assets (api.js + x2t) are present in Cache Storage. */
+      ready?: boolean;
     };
 
 export const WARMUP_CACHE_PREFIX = "editor-static-";

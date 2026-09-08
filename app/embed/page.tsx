@@ -23,7 +23,7 @@ import {
 } from "@/utils/embed-protocol";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
-import { prefetchEditorAssets } from "@/utils/editor/warmup";
+import { ensureEditorAssets, loadScriptCached } from "@/utils/editor/warmup";
 import {
   AGENT_PLUGIN_GUID,
   AGENT_PLUGIN_MANIFEST,
@@ -694,13 +694,18 @@ export default function EmbedPage() {
 
     if (isWarmup) {
       setWarmupLabel("Preparando cache do editor…");
-      void prefetchEditorAssets(resolvedAppRoot, (done, total) => {
+      void ensureEditorAssets(resolvedAppRoot, (done, total) => {
         setWarmupLabel(`Preparando cache do editor… ${done}/${total}`);
       })
         .then((result) => {
-          postToHost({ type: "warmed", cached: result.cached, failed: result.failed });
+          postToHost({
+            type: "warmed",
+            cached: result.cached,
+            failed: result.failed,
+            ready: result.ready,
+          });
           setLoading(false);
-          setWarmupLabel("Cache do editor pronto.");
+          setWarmupLabel(result.ready ? "Cache do editor pronto." : "Cache incompleto — tentaremos de novo.");
         })
         .catch((err: unknown) => {
           postToHost({
@@ -1092,17 +1097,32 @@ export default function EmbedPage() {
         callback();
         return;
       }
-      let script = document.querySelector<HTMLScriptElement>(`script[src="${apiUrl}"]`);
-      if (!script) {
-        script = document.createElement("script");
-        script.src = apiUrl;
-        document.head.appendChild(script);
-      }
-      script.onload = () => callback();
-      script.onerror = () => {
-        openingRef.current = false;
-        postToHost({ type: "error", message: "Failed to load DocsAPI script" });
-      };
+      void (async () => {
+        try {
+          const ensured = await ensureEditorAssets(resolvedAppRoot, (done, total) => {
+            setWarmupLabel(`Preparando cache do editor… ${done}/${total}`);
+          });
+          if (!ensured.skipped) {
+            setWarmupLabel("Preparando cache do editor…");
+            postToHost({
+              type: "warmed",
+              cached: ensured.cached,
+              failed: ensured.failed,
+              ready: ensured.ready,
+            });
+          }
+          await loadScriptCached(apiUrl);
+          setWarmupLabel(null);
+          callback();
+        } catch (err) {
+          openingRef.current = false;
+          setWarmupLabel(null);
+          postToHost({
+            type: "error",
+            message: err instanceof Error ? err.message : "Failed to load DocsAPI script",
+          });
+        }
+      })();
     };
 
     const findPluginFrames = (): HTMLIFrameElement[] => {
