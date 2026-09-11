@@ -33,6 +33,37 @@ function extOf(value?: string): string {
   return base.replace(/^\./, "").toLowerCase();
 }
 
+const XLSX_FAMILY = new Set(["xlsx", "xls", "xlsm", "xlsb", "xltx", "xltm"]);
+const PPTX_FAMILY = new Set(["pptx", "ppt", "pptm", "ppsx"]);
+
+function outputMatchesOriginal(original: string, outputformat: number): boolean {
+  const native = nativeFormatFromExt(original);
+  if (native != null && outputformat === native) return true;
+  if (XLSX_FAMILY.has(original)) {
+    return (
+      outputformat === AvsFileType.AVS_FILE_SPREADSHEET_XLSX ||
+      outputformat === AvsFileType.AVS_FILE_SPREADSHEET_XLSX_FLAT ||
+      outputformat === AvsFileType.AVS_FILE_SPREADSHEET_XLSX_PACKAGE ||
+      outputformat === AvsFileType.AVS_FILE_SPREADSHEET_XLSM ||
+      outputformat === AvsFileType.AVS_FILE_SPREADSHEET_XLS
+    );
+  }
+  if (PPTX_FAMILY.has(original)) {
+    return (
+      outputformat === AvsFileType.AVS_FILE_PRESENTATION_PPTX ||
+      outputformat === AvsFileType.AVS_FILE_PRESENTATION_PPTX_PACKAGE
+    );
+  }
+  return false;
+}
+
+function formatMatchesOriginal(original: string, format: string): boolean {
+  if (!format || format === original) return true;
+  if (XLSX_FAMILY.has(original) && XLSX_FAMILY.has(format)) return true;
+  if (PPTX_FAMILY.has(original) && PPTX_FAMILY.has(format)) return true;
+  return false;
+}
+
 export function isPdfDownloadAs(cmd: DownloadAsCmd): boolean {
   const format = extOf(cmd.format);
   const titleExt = extOf(cmd.title);
@@ -45,6 +76,7 @@ export function isPdfDownloadAs(cmd: DownloadAsCmd): boolean {
 /**
  * True when downloadAs is a save of the original Office file.
  * Print / Download as PDF / other exports must not overwrite the document.
+ * Spreadsheet editor often sends XLSX_FLAT / XLSX_PACKAGE instead of XLSX.
  */
 export function isNativeOfficePersistExport(
   originalExt: string,
@@ -55,13 +87,12 @@ export function isNativeOfficePersistExport(
   if (isPdfDownloadAs(cmd) && original !== "pdf") return false;
 
   const format = extOf(cmd.format);
-  if (format && format !== original) return false;
+  if (format && !formatMatchesOriginal(original, format)) return false;
 
   const titleExt = cmd.title?.includes(".") ? extOf(cmd.title) : "";
-  if (titleExt && titleExt !== original) return false;
+  if (titleExt && !formatMatchesOriginal(original, titleExt)) return false;
 
-  const native = nativeFormatFromExt(original);
-  if (cmd.outputformat != null && native != null && cmd.outputformat !== native) {
+  if (cmd.outputformat != null && !outputMatchesOriginal(original, cmd.outputformat)) {
     return false;
   }
 

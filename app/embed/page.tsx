@@ -574,6 +574,7 @@ export default function EmbedPage() {
   const hostOriginRef = useRef<string>("*");
   const fileMetaRef = useRef({ fileName: "document.docx", fileType: "docx" });
   const saveRequestIdRef = useRef<string | null>(null);
+  const hostSaveUntilRef = useRef(0);
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
   const openingRef = useRef(false);
@@ -729,18 +730,21 @@ export default function EmbedPage() {
         const requestId = saveRequestIdRef.current || undefined;
         saveRequestIdRef.current = null;
         isDirty.current = false;
-        postToHost(
-          {
-            type: "saved",
-            requestId,
-            fileName: fileName || fileMetaRef.current.fileName,
-            fileType: fileMetaRef.current.fileType,
-            mime: embedMimeForType(fileMetaRef.current.fileType),
-            bytes,
-          },
-          [bytes],
-        );
+        // Clone, do not transfer: WKWebView often delivers a detached buffer to the host.
+        postToHost({
+          type: "saved",
+          requestId,
+          fileName: fileName || fileMetaRef.current.fileName,
+          fileType: fileMetaRef.current.fileType,
+          mime: embedMimeForType(fileMetaRef.current.fileType),
+          bytes,
+        });
         postToHost({ type: "dirty", value: false });
+      },
+      onSaveFailed: (message) => {
+        const requestId = saveRequestIdRef.current || undefined;
+        saveRequestIdRef.current = null;
+        postToHost({ type: "error", message, requestId });
       },
     });
     serverRef.current = server;
@@ -1080,6 +1084,7 @@ export default function EmbedPage() {
             postToHost({ type: "error", message: String(e) });
           },
           onDownloadAs: () => {
+            if (saveRequestIdRef.current || Date.now() < hostSaveUntilRef.current) return;
             postToHost({ type: "print" });
           },
         },
@@ -1261,6 +1266,7 @@ export default function EmbedPage() {
           return;
         }
         saveRequestIdRef.current = data.requestId;
+        hostSaveUntilRef.current = Date.now() + 20_000;
         try {
           editor.downloadAs(fileMetaRef.current.fileType);
         } catch (err: unknown) {

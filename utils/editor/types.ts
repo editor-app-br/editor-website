@@ -217,4 +217,5 @@ export interface ServerOptions {
   persistFile?: (blob: Blob, fileName: string) => Promise<void>;
   onExportedFile?: (blob: Blob, fileName: string) => Promise<void>;
   onExportFinished?: () => void;
+  onSaveFailed?: (message: string) => void;
 }

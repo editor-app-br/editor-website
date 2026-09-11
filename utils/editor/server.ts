@@ -516,6 +516,9 @@ export class EditorServer {
         const nativePersist = isNativeOfficePersistExport(this.fileType, cmd);
         const fileTo = nativePersist ? `doc.${this.fileType}` : `doc.${titleExt}`;
         let formatTo = cmd.outputformat ?? nativeFormatFromExt(nativePersist ? this.fileType : titleExt);
+        if (nativePersist) {
+          formatTo = nativeFormatFromExt(this.fileType) ?? formatTo;
+        }
         if (!formatTo && fileTo.endsWith(".pdf")) {
           formatTo = AvsFileType.AVS_FILE_CROSSPLATFORM_PDF;
         }
@@ -545,8 +548,10 @@ export class EditorServer {
             });
             if (!output) {
               console.error("Conversion failed");
-              // Host persist: never show OnlyOffice "Baixar como" for a failed WASM save.
-              return nativePersist && this.options.persistFile ? { status: "ok" } : { status: "error" };
+              if (nativePersist) {
+                this.options.onSaveFailed?.("Falha ao exportar o documento.");
+              }
+              return { status: "error" };
             }
             const blob = new Blob([new Uint8Array(output)]);
             if (nativePersist && this.options.persistFile) {
@@ -575,7 +580,10 @@ export class EditorServer {
             return { status: "ok" };
           } catch (err) {
             console.error(err);
-            return nativePersist && this.options.persistFile ? { status: "ok" } : { status: "error" };
+            if (nativePersist) {
+              this.options.onSaveFailed?.(err instanceof Error ? err.message : "Falha ao exportar o documento.");
+            }
+            return { status: "error" };
           } finally {
             if (nativePersist) this.options.onExportFinished?.();
           }
