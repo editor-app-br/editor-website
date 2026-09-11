@@ -62,6 +62,22 @@ export type HostToEditorMessage =
       payload?: Record<string, unknown>;
     };
 
+const HOST_TO_EDITOR_TYPES = new Set([
+  "open",
+  "save",
+  "setTheme",
+  "print",
+  "destroy",
+  "command",
+]);
+
+/** True for workspace/host commands. OnlyOffice frame messages are strings or other shapes. */
+export function isHostToEditorMessage(data: unknown): data is HostToEditorMessage {
+  if (!data || typeof data !== "object") return false;
+  const type = (data as { type?: unknown }).type;
+  return typeof type === "string" && HOST_TO_EDITOR_TYPES.has(type);
+}
+
 /** Debug fields for Agent plugin mount failures (third-party /embed). */
 export type EmbedPluginDiag = {
   crossOriginIsolated: boolean;

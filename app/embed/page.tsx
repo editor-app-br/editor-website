@@ -20,6 +20,7 @@ import {
   EmbedPluginDiag,
   EditorToHostMessage,
   HostToEditorMessage,
+  isHostToEditorMessage,
 } from "@/utils/embed-protocol";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
@@ -571,7 +572,6 @@ export default function EmbedPage() {
   const editorRef = useRef<DocEditor | null>(null);
   const serverRef = useRef<EditorServer | null>(null);
   const pluginModeRef = useRef<PluginMode>("agent");
-  const hostOriginRef = useRef<string>("*");
   const fileMetaRef = useRef({ fileName: "document.docx", fileType: "docx" });
   const saveRequestIdRef = useRef<string | null>(null);
   const hostSaveUntilRef = useRef(0);
@@ -590,30 +590,18 @@ export default function EmbedPage() {
 
   const postToHost = (msg: EditorToHostMessage, transferables?: Transferable[]) => {
     if (typeof window === "undefined" || !window.parent || window.parent === window) return;
-    const target = hostOriginRef.current || "*";
-    const send = (dest: string) => {
-      if (transferables && transferables.length > 0) {
-        window.parent.postMessage(msg, dest, transferables);
-      } else {
-        window.parent.postMessage(msg, dest);
-      }
-    };
+    // Always "*": OnlyOffice frameEditor is same-origin (editor.app.br). Using
+    // that origin as postMessage targetOrigin dropped dirty/saved while
+    // handshake still reached the Tauri parent via "*".
+    const target = "*";
     try {
-      send(target);
-    } catch {
-      if (target !== "*") send("*");
-    }
-    // Handshake events: also send "*" so a mismatched target origin cannot drop them.
-    if (
-      (!transferables || transferables.length === 0) &&
-      target !== "*" &&
-      (msg.type === "ready" || msg.type === "appReady" || msg.type === "documentReady" || msg.type === "error")
-    ) {
-      try {
-        send("*");
-      } catch {
-        /* ignore */
+      if (transferables && transferables.length > 0) {
+        window.parent.postMessage(msg, target, transferables);
+      } else {
+        window.parent.postMessage(msg, target);
       }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -1215,13 +1203,14 @@ export default function EmbedPage() {
     };
 
     const handleHostMessage = async (event: MessageEvent<HostToEditorMessage>) => {
+      const data = event.data;
+      // OnlyOffice posts stringified JSON from frameEditor (same origin). Those
+      // must not replace the Tauri/workspace host origin or dirty/saved never arrive.
+      if (!isHostToEditorMessage(data)) return;
       if (!isAllowedEmbedHostOrigin(event.origin)) {
         await loadEmbedPartnerConfig();
         if (!isAllowedEmbedHostOrigin(event.origin)) return;
       }
-      hostOriginRef.current = event.origin;
-      const data = event.data;
-      if (!data || typeof data !== "object") return;
 
       if (data.type === "open") {
         if (openingRef.current || editorRef.current) return;
