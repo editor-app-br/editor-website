@@ -1,0 +1,22 @@
+{
+  "version": "1.0.43",
+  "appRoot": "/v9.3.1-2",
+  "paths": [
+    "/embed",
+    "/embed-partner.json",
+    "/app-root.json",
+    "/v9.3.1-2/web-apps/apps/api/documents/api.js",
+    "/v9.3.1-2/web-apps/apps/api/documents/preload.html",
+    "/v9.3.1-2/sdkjs-plugins/v1/plugins.js",
+    "/v9.3.1-2/plugins.json",
+    "/v9.3.1-2/web-apps/apps/documenteditor/main/index.html",
+    "/v9.3.1-2/web-apps/apps/spreadsheeteditor/main/index.html",
+    "/v9.3.1-2/web-apps/apps/presentationeditor/main/index.html",
+    "/v9.3.1-2/web-apps/apps/pdfeditor/main/index.html",
+    "/x2t/x2t.js",
+    "/x2t/x2t.wasm",
+    "/office-plugins/agent/config.json",
+    "/office-plugins/agent/index.html",
+    "/office-plugins/agent/plugin.js"
+  ]
+}

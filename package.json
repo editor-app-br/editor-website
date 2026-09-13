@@ -1,6 +1,6 @@
 {
   "name": "editor-website",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "description": "Modern AGPL v3 online office suite for editor.app.br sponsored by PRATA CONSULTORIA EM TECNOLOGIA DA INFORMACAO LTDA",
   "license": "AGPL-3.0-or-later",
   "author": "PRATA CONSULTORIA EM TECNOLOGIA DA INFORMACAO LTDA <contato@prata.dev.br>",
@@ -15,7 +15,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/generate-embed-offline-manifest.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "pnpm build",
