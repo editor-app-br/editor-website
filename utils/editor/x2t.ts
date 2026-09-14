@@ -12,6 +12,19 @@ import { X2tConvertParams, X2tConvertResult } from "./types";
 const WORKER_URL = "/office-x2t-worker.js";
 const WORKER_CONVERT_MS = 12_000;
 
+/** Tauri shell serves /embed on localhost:<port>; WKWebView x2t Workers often hang. */
+function preferMainThreadX2t(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const { hostname, port } = window.location;
+    if (hostname !== "localhost" && hostname !== "127.0.0.1") return false;
+    const p = Number(port);
+    return Number.isFinite(p) && p >= 18760 && p <= 18840;
+  } catch {
+    return false;
+  }
+}
+
 interface PendingMessage {
   resolve: (value: X2tConvertResult) => void;
   reject: (error: Error) => void;
@@ -58,7 +71,9 @@ export class X2tConverter {
   private pendingMessages = new Map<number, PendingMessage>();
 
   constructor() {
-    if (typeof globalThis.Worker === "function") {
+    if (preferMainThreadX2t()) {
+      this.useMain = true;
+    } else if (typeof globalThis.Worker === "function") {
       void this.init();
     } else {
       this.useMain = true;

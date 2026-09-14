@@ -1225,6 +1225,8 @@ export default function EmbedPage() {
           openingStartedAtRef.current = 0;
         }
         postToHost({ type: "openAck", requestId: data.requestId });
+        const openPhase = (phase: string) =>
+          postToHost({ type: "openPhase", phase, requestId: data.requestId });
         try {
           stopReadyPing();
           setLoading(true);
@@ -1240,21 +1242,42 @@ export default function EmbedPage() {
           }
           const blob = new Blob([openBuffer]);
           const file = new File([blob], data.fileName, { type: "application/octet-stream" });
-          await server.open(file, {
-            fileName: data.fileName,
-            fileType: data.fileType,
-          });
           const uiTheme =
             data.theme === "dark" ? "theme-dark" : data.theme === "light" ? "theme-light" : "theme-white";
-          loadEditorScript(() => {
-            createEditorInstance({
-              editing: data.editing,
-              lang: toOnlyOfficeLang(data.lang || "pt"),
-              uiTheme,
-              fileName: data.fileName,
-              hideChrome: hideChromeRef.current,
-            });
-          });
+
+          await Promise.race([
+            (async () => {
+              openPhase("x2t");
+              await server.open(file, {
+                fileName: data.fileName,
+                fileType: data.fileType,
+              });
+              openPhase("docsapi");
+              await new Promise<void>((resolve, reject) => {
+                loadEditorScript(() => {
+                  try {
+                    openPhase("doceditor");
+                    createEditorInstance({
+                      editing: data.editing,
+                      lang: toOnlyOfficeLang(data.lang || "pt"),
+                      uiTheme,
+                      fileName: data.fileName,
+                      hideChrome: hideChromeRef.current,
+                    });
+                    resolve();
+                  } catch (err) {
+                    reject(err);
+                  }
+                });
+              });
+            })(),
+            new Promise<never>((_, reject) => {
+              window.setTimeout(
+                () => reject(new Error("Open pipeline timed out (x2t or DocsAPI)")),
+                90_000,
+              );
+            }),
+          ]);
         } catch (err: unknown) {
           openingRef.current = false;
           openingStartedAtRef.current = 0;

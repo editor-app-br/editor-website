@@ -146,6 +146,11 @@ export type EditorToHostMessage =
       requestId: string;
     }
   | {
+      type: "openPhase";
+      phase: string;
+      requestId?: string;
+    }
+  | {
       type: "appReady";
     }
   | {
