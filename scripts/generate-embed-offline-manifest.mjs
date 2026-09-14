@@ -30,6 +30,7 @@ const paths = [
   ...editorShells.map((p) => `${appRoot}${p}`),
   '/x2t/x2t.js',
   '/x2t/x2t.wasm',
+  '/office-x2t-worker.js',
   '/office-plugins/agent/config.json',
   '/office-plugins/agent/index.html',
   '/office-plugins/agent/plugin.js',

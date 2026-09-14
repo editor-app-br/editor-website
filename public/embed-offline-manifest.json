@@ -1,5 +1,5 @@
 {
-  "version": "1.0.44",
+  "version": "1.0.46",
   "appRoot": "/v9.3.1-2",
   "paths": [
     "/embed",
@@ -15,6 +15,7 @@
     "/v9.3.1-2/web-apps/apps/pdfeditor/main/index.html",
     "/x2t/x2t.js",
     "/x2t/x2t.wasm",
+    "/office-x2t-worker.js",
     "/office-plugins/agent/config.json",
     "/office-plugins/agent/index.html",
     "/office-plugins/agent/plugin.js"
