@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useEffect, useState } from "react";
-import { useResolvedLanguage, useHasHydrated } from "@/store";
+import { useResolvedLanguage } from "@/store";
 import {
   API_JS,
   getAppRoot,
@@ -22,6 +22,7 @@ import {
   HostToEditorMessage,
   isHostToEditorMessage,
 } from "@/utils/embed-protocol";
+import { hostOpenBytes } from "@/utils/embed-open-bytes";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import {
@@ -564,7 +565,6 @@ function parseAgentPayload(raw: unknown): {
 
 export default function EmbedPage() {
   const defaultLanguage = useResolvedLanguage();
-  const hasHydrated = useHasHydrated();
   const [loading, setLoading] = useState(true);
   const [appRoot, setAppRoot] = useState<string>(() => getAppRoot());
   const [warmupLabel, setWarmupLabel] = useState<string | null>(null);
@@ -578,6 +578,8 @@ export default function EmbedPage() {
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
   const openingRef = useRef(false);
+  const openingStartedAtRef = useRef(0);
+  const OPEN_STALL_MS = 45_000;
   const pluginReadyFromChild = useRef(false);
   const pluginSourceRef = useRef<MessageEventSource | null>(null);
 
@@ -677,8 +679,6 @@ export default function EmbedPage() {
   }, []);
 
   useLayoutEffect(() => {
-    if (!hasHydrated) return;
-
     const searchParams = new URLSearchParams(window.location.search);
     const resolvedAppRoot = getAppRoot(searchParams.get("v") || searchParams.get("version"));
     setAppRoot(resolvedAppRoot);
@@ -1213,16 +1213,32 @@ export default function EmbedPage() {
       }
 
       if (data.type === "open") {
-        if (openingRef.current || editorRef.current) return;
+        if (openingRef.current || editorRef.current) {
+          const stalled =
+            openingRef.current &&
+            !editorRef.current &&
+            openingStartedAtRef.current > 0 &&
+            Date.now() - openingStartedAtRef.current > OPEN_STALL_MS;
+          if (!stalled) return;
+          destroyEditor();
+          openingRef.current = false;
+          openingStartedAtRef.current = 0;
+        }
+        postToHost({ type: "openAck", requestId: data.requestId });
         try {
           stopReadyPing();
           setLoading(true);
           destroyEditor();
           openingRef.current = true;
+          openingStartedAtRef.current = Date.now();
           pluginModeRef.current = data.plugins === "none" || data.variant === "preview" ? "none" : "agent";
           hideChromeRef.current = data.hideChrome === true || data.variant === "preview";
           fileMetaRef.current = { fileName: data.fileName, fileType: String(data.fileType) };
-          const blob = new Blob([data.bytes]);
+          const openBuffer = hostOpenBytes(data);
+          if (!openBuffer || openBuffer.byteLength === 0) {
+            throw new Error("Invalid or empty document bytes from host");
+          }
+          const blob = new Blob([openBuffer]);
           const file = new File([blob], data.fileName, { type: "application/octet-stream" });
           await server.open(file, {
             fileName: data.fileName,
@@ -1241,6 +1257,7 @@ export default function EmbedPage() {
           });
         } catch (err: unknown) {
           openingRef.current = false;
+          openingStartedAtRef.current = 0;
           const message = err instanceof Error ? err.message : "Failed to open document";
           postToHost({ type: "error", message, requestId: data.requestId });
           setLoading(false);
@@ -1311,7 +1328,7 @@ export default function EmbedPage() {
       destroyEditor();
       serverRef.current = null;
     };
-  }, [hasHydrated, defaultLanguage]);
+  }, [defaultLanguage]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-background m-0 p-0">

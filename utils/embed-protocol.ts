@@ -36,7 +36,9 @@ export type HostToEditorMessage =
       editing: boolean;
       theme?: EmbedTheme;
       lang?: string;
-      bytes: ArrayBuffer;
+      bytes?: ArrayBuffer;
+      /** Fallback when WKWebView drops structured-clone ArrayBuffer on postMessage. */
+      bytesB64?: string;
       variant?: EmbedVariant;
       hideChrome?: boolean;
       plugins?: EmbedPluginMode;
@@ -138,6 +140,10 @@ export type EditorToHostMessage =
       shown: boolean;
       text?: string;
       accepted?: boolean;
+    }
+  | {
+      type: "openAck";
+      requestId: string;
     }
   | {
       type: "appReady";
