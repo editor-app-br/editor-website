@@ -14,6 +14,7 @@ import { createFetchProxy } from "@/utils/editor/fetch";
 import { createXHRProxy } from "@/utils/editor/xhr";
 import { DocEditor, PluginMode } from "@/utils/editor/types";
 import { EditorServer } from "@/utils/editor/server";
+import { converter as x2tConverter } from "@/utils/editor/x2t";
 import {
   EMBED_PROTOCOL_VERSION,
   embedMimeForType,
@@ -889,6 +890,7 @@ export default function EmbedPage() {
         /* already torn down */
       }
       editorRef.current = null;
+      x2tConverter.reset();
       const placeholder = document.getElementById("placeholder");
       if (placeholder) placeholder.innerHTML = "";
     };

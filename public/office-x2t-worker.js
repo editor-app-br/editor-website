@@ -23,26 +23,59 @@ self.fetch = function (input, init) {
   }
   if (href.indexOf("/x2t/") === -1) return nativeFetch(input, init);
   if (typeof caches === "undefined") return nativeFetch(input, init);
+
+  function wasmMagicOk(resp) {
+    if (!resp || !resp.ok) return Promise.resolve(false);
+    if (href.indexOf("x2t.wasm") === -1) return Promise.resolve(true);
+    return resp
+      .clone()
+      .arrayBuffer()
+      .then(function (buf) {
+        var u8 = new Uint8Array(buf);
+        return u8.length >= 4 && u8[0] === 0 && u8[1] === 97 && u8[2] === 115 && u8[3] === 109;
+      })
+      .catch(function () {
+        return false;
+      });
+  }
+
+  function fetchFresh() {
+    return nativeFetch(href, { credentials: "same-origin", cache: "reload" }).then(function (resp) {
+      if (resp && resp.ok) {
+        wasmMagicOk(resp).then(function (valid) {
+          if (!valid) return;
+          caches.keys().then(function (keys) {
+            var name =
+              keys.filter(function (k) {
+                return k.indexOf("editor-static-") === 0;
+              })[0] || "editor-static-x2t";
+            caches.open(name).then(function (cache) {
+              cache.put(href, resp.clone());
+            });
+          });
+        });
+      }
+      return resp;
+    });
+  }
+
   return caches
     .match(href)
     .then(function (hit) {
-      if (hit && hit.ok) return hit;
-      return nativeFetch(href, { credentials: "same-origin", cache: "reload" }).then(
-        function (resp) {
-          if (resp && resp.ok) {
-            caches.keys().then(function (keys) {
-              var name =
-                keys.filter(function (k) {
-                  return k.indexOf("editor-static-") === 0;
-                })[0] || "editor-static-x2t";
+      if (!hit || !hit.ok) return fetchFresh();
+      return wasmMagicOk(hit).then(function (valid) {
+        if (valid) return hit;
+        return caches.keys().then(function (keys) {
+          keys.forEach(function (name) {
+            if (name.indexOf("editor-static-") === 0) {
               caches.open(name).then(function (cache) {
-                cache.put(href, resp.clone());
+                cache.delete(href);
               });
-            });
-          }
-          return resp;
-        },
-      );
+            }
+          });
+          return fetchFresh();
+        });
+      });
     })
     .catch(function () {
       return nativeFetch(input, init);

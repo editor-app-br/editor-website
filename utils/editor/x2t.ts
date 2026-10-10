@@ -166,6 +166,23 @@ export class X2tConverter {
     }
   }
 
+  /** Drop the worker between embed opens without forcing main-thread x2t. */
+  public reset(): void {
+    for (const pending of this.pendingMessages.values()) {
+      pending.reject(new Error("x2t worker reset"));
+    }
+    this.pendingMessages.clear();
+    try {
+      this.worker?.terminate();
+    } catch {
+      /* already dead */
+    }
+    this.worker = null;
+    this.useMain = false;
+    this.initPromise = null;
+    this.messageId = 0;
+  }
+
   public terminate(): void {
     this.failWorker("Worker terminated");
     this.initPromise = null;
