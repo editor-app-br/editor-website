@@ -140,6 +140,7 @@ export default function Page() {
               spellcheck: {
                 change: false,
               },
+              featuresTips: false,
             },
             logo: {
               // OnlyOffice parses headerlogo as SVG. Wordmark/PNG throw setAttribute.

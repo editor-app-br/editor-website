@@ -964,6 +964,10 @@ export default function EmbedPage() {
               spellcheck: {
                 change: false,
               },
+              // Multipage-view "Novo" balloon (and other first-load feature tips).
+              // Entendi is stored in iframe localStorage and does not persist in
+              // third-party / Tauri embeds, so the tip otherwise repeats every open.
+              featuresTips: false,
             },
             plugins: pluginModeRef.current === "agent",
             about: !isPreview,
