@@ -593,6 +593,8 @@ export default function EmbedPage() {
   const hostSaveUntilRef = useRef(0);
   /** Ignore editor dirty/error events caused by applying a comparison. */
   const compareQuietUntilRef = useRef(0);
+  /** OnlyOffice may autosave right after open; do not push bytes to the host yet. */
+  const documentOpenQuietUntilRef = useRef(0);
   const comparingRef = useRef(false);
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
@@ -738,6 +740,15 @@ export default function EmbedPage() {
     const server = new EditorServer({
       getState: () => ({ plugins: pluginModeRef.current }),
       persistFile: async (blob, fileName) => {
+        const hostRequested = Boolean(saveRequestIdRef.current);
+        const pastOpenQuiet = Date.now() >= documentOpenQuietUntilRef.current;
+        const pastCompareQuiet = Date.now() >= compareQuietUntilRef.current;
+        if (
+          !hostRequested &&
+          (!isDirty.current || !pastOpenQuiet || !pastCompareQuiet)
+        ) {
+          return;
+        }
         const bytes = await blob.arrayBuffer();
         const requestId = saveRequestIdRef.current || undefined;
         saveRequestIdRef.current = null;
@@ -956,7 +967,7 @@ export default function EmbedPage() {
             chat: false,
             rename: canEdit,
             protect: canEdit,
-            review: canEdit && isWordCompareType(doc.fileType),
+            review: false,
             print: false,
             download: !isPreview,
             plugins: pluginModeRef.current === "agent",
@@ -976,7 +987,7 @@ export default function EmbedPage() {
           ...(pluginModeRef.current === "agent" ? { plugins: getAgentPluginsData(location.origin) } : {}),
           customization: {
             uiTheme: options.uiTheme,
-            autosave: canEdit,
+            autosave: false,
             compactHeader: true,
             toolbarHideFileName: true,
             hideRightMenu: true,
@@ -1034,6 +1045,8 @@ export default function EmbedPage() {
           },
           onDocumentReady: () => {
             openingRef.current = false;
+            documentOpenQuietUntilRef.current = Date.now() + 12_000;
+            isDirty.current = false;
             setLoading(false);
             const iframe = document.querySelector<HTMLIFrameElement>(
               'iframe[name="frameEditor"]',
