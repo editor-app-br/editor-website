@@ -1233,7 +1233,7 @@ export default function EmbedPage() {
     };
 
     const openOnlyOfficeFind = () => {
-      const iframe = document.querySelector('iframe[name="frameEditor"]');
+      const iframe = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
       const win = iframe?.contentWindow as
         | (Window & {
             Asc?: { editor?: { asc_findText?: (text: string, next?: boolean, matchCase?: boolean) => void } };
