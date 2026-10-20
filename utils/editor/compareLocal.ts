@@ -1,13 +1,17 @@
 import { converter } from "./x2t";
 import type { EditorServer } from "./server";
 
+type CompareFile = {
+  GetBinary: () => Uint8Array;
+  GetImageMap: () => Record<string, string>;
+  IsValid: () => boolean;
+};
+
 type CompareHost = Window & {
+  editor?: { asc_SetDisplayModeInReview?: (mode: number) => void };
   AscCommonWord?: {
-    CompareDocuments: (file: {
-      GetBinary: () => Uint8Array;
-      GetImageMap: () => Record<string, string>;
-      IsValid: () => boolean;
-    }) => void;
+    /** OnlyOffice 9.3: (editorApi, revisedFile). The file alone throws inside the frame. */
+    CompareDocuments: (editorApi: object, file: CompareFile) => void;
   };
   Asc?: {
     c_oAscDisplayModeInReview?: { Edit: number };
@@ -41,7 +45,8 @@ export async function compareWordDocument(options: {
   const frame = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
   const win = frame?.contentWindow as CompareHost | null | undefined;
   const compare = win?.AscCommonWord?.CompareDocuments;
-  if (!win || !compare) throw new Error("O editor ainda não está pronto para comparar.");
+  const editorApi = win?.Asc?.editor || win?.editor;
+  if (!win || !compare || !editorApi) throw new Error("O editor ainda não está pronto para comparar.");
 
   const binary = converted.output;
   const imageMap = options.server.urlsForCompareMedia(converted.media || {});
@@ -50,14 +55,14 @@ export async function compareWordDocument(options: {
   // CompareBinary refuses the call unless the editor is in single-user mode.
   if (collab && previousUse !== 1) collab.m_nUseType = 1;
   try {
-    compare({
+    compare(editorApi, {
       GetBinary: () => binary,
       GetImageMap: () => imageMap,
       IsValid: () => true,
     });
     const editMode = win.Asc?.c_oAscDisplayModeInReview?.Edit;
     if (typeof editMode === "number") {
-      win.Asc?.editor?.asc_SetDisplayModeInReview?.(editMode);
+      editorApi.asc_SetDisplayModeInReview?.(editMode);
     }
   } finally {
     if (collab && previousUse !== undefined && previousUse !== 1) {

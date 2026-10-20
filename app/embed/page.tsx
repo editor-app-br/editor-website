@@ -51,6 +51,16 @@ function isWordCompareType(fileType: string): boolean {
   return /^(docx|docm)$/i.test(fileType.replace(/^\./, ""));
 }
 
+/** iframe exceptions are not `instanceof Error` in the parent window. */
+function messageFromThrown(err: unknown): string {
+  if (typeof err === "string" && err.trim()) return err;
+  if (err && typeof err === "object" && "message" in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "Falha ao comparar.";
+}
+
 type PluginHost = {
   onExternalPluginMessage?: (data: Record<string, unknown>) => void;
 };
@@ -1408,7 +1418,7 @@ export default function EmbedPage() {
             postToHost({
               type: "compareError",
               requestId,
-              message: err instanceof Error ? err.message : "Falha ao comparar.",
+              message: messageFromThrown(err),
             });
           } finally {
             comparingRef.current = false;
