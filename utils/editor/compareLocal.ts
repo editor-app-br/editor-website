@@ -24,7 +24,7 @@ type DeApplication = {
 };
 
 type CompareHost = Window & {
-  DE?: { getApplication: () => DeApplication };
+  DE?: DeApplication & { getApplication?: () => DeApplication };
   $?: (selector: string) => { width: () => number; height: () => number };
   Common?: {
     Views: {
@@ -55,31 +55,46 @@ type CompareHost = Window & {
   };
 };
 
+function reviewChangesController(win: CompareHost): ReviewChangesController | null | undefined {
+  const de = win.DE;
+  if (de) {
+    const app = typeof de.getApplication === "function" ? de.getApplication() : de;
+    const ctrl = app?.getController?.("Common.Controllers.ReviewChanges");
+    if (ctrl) return ctrl;
+  }
+  const editorApi = win.Asc?.editor ?? win.editor;
+  const fromEditor = (editorApi as { getApplication?: () => DeApplication } | undefined)?.getApplication?.();
+  return fromEditor?.getController?.("Common.Controllers.ReviewChanges") ?? null;
+}
+
 /** Floating "Rever alterações" panel — only after version compare, not on every open. */
 export function openReviewChangesPanel(): void {
-  const frame = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
-  const win = frame?.contentWindow as CompareHost | null | undefined;
-  const common = win?.Common;
-  const app = win?.DE?.getApplication();
-  const ctrl = app?.getController("Common.Controllers.ReviewChanges");
-  const jq = win?.$;
-  if (!win || !common || !ctrl || !jq) return;
+  try {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
+    const win = frame?.contentWindow as CompareHost | null | undefined;
+    const common = win?.Common;
+    const ctrl = win ? reviewChangesController(win) : null;
+    const jq = win?.$;
+    if (!win || !common || !ctrl || !jq) return;
 
-  if (!ctrl.dlgChanges) {
-    ctrl.dlgChanges = new common.Views.ReviewChangesDialog({
-      popoverChanges: ctrl.popoverChanges,
-      mode: ctrl.appConfig,
-      docProtection: ctrl._state?.docProtection,
-    });
+    if (!ctrl.dlgChanges) {
+      ctrl.dlgChanges = new common.Views.ReviewChangesDialog({
+        popoverChanges: ctrl.popoverChanges,
+        mode: ctrl.appConfig,
+        docProtection: ctrl._state?.docProtection,
+      });
+    }
+
+    const sdk = jq("#editor_sdk");
+    const offset = common.Utils.getOffset(sdk);
+    ctrl.dlgChanges.show(
+      Math.max(10, offset.left + sdk.width() - 300),
+      Math.max(10, offset.top + sdk.height() - 150),
+    );
+    ctrl.onApiShowChange?.();
+  } catch {
+    // Comparison markup stays in the document even when the panel cannot mount.
   }
-
-  const sdk = jq("#editor_sdk");
-  const offset = common.Utils.getOffset(sdk);
-  ctrl.dlgChanges.show(
-    Math.max(10, offset.left + sdk.width() - 300),
-    Math.max(10, offset.top + sdk.height() - 150),
-  );
-  ctrl.onApiShowChange?.();
 }
 
 /**
