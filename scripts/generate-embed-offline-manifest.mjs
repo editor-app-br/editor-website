@@ -37,13 +37,14 @@ const paths = [
 ]
 
 const publicDir = path.join(root, 'public')
-fs.writeFileSync(
-  path.join(publicDir, 'embed-release.json'),
-  `${JSON.stringify({ version, manifest: '/embed-offline-manifest.json' }, null, 2)}\n`
-)
-fs.writeFileSync(
-  path.join(publicDir, 'embed-offline-manifest.json'),
-  `${JSON.stringify({ version, appRoot, paths }, null, 2)}\n`
-)
+const outDir = path.join(root, 'out')
+const releaseJson = `${JSON.stringify({ version, manifest: '/embed-offline-manifest.json' }, null, 2)}\n`
+const manifestJson = `${JSON.stringify({ version, appRoot, paths }, null, 2)}\n`
+
+for (const dir of [publicDir, outDir]) {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'embed-release.json'), releaseJson)
+  fs.writeFileSync(path.join(dir, 'embed-offline-manifest.json'), manifestJson)
+}
 
 console.log(`embed offline manifest v${version} (${paths.length} paths, appRoot=${appRoot})`)
