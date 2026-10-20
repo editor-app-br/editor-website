@@ -1,5 +1,3 @@
-import type { HostToEditorMessage } from "@/utils/embed-protocol";
-
 function base64ToArrayBuffer(b64: string): ArrayBuffer | null {
   try {
     const bin = atob(b64);
@@ -13,10 +11,8 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer | null {
   }
 }
 
-/** Resolve document bytes from host `open` (ArrayBuffer or base64 fallback for WKWebView). */
-export function hostOpenBytes(
-  data: Extract<HostToEditorMessage, { type: "open" }> & { bytesB64?: string },
-): ArrayBuffer | null {
+/** Resolve document bytes from a host message (ArrayBuffer or base64 fallback for WKWebView). */
+export function hostOpenBytes(data: { bytes?: unknown; bytesB64?: string }): ArrayBuffer | null {
   const row = data as { bytes?: unknown; bytesB64?: string };
   if (row.bytes instanceof ArrayBuffer && row.bytes.byteLength > 0) {
     return row.bytes;

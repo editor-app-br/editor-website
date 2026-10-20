@@ -103,6 +103,7 @@ export class EditorServer {
 
   private downloadId: string = "";
   private downloadParts: Uint8Array[] = [];
+  private revisedFile: Uint8Array | null = null;
   private objectUrlFactory: ObjectUrlFactory = (blob) => URL.createObjectURL(blob);
 
   private options: ServerOptions = {};
@@ -208,6 +209,10 @@ export class EditorServer {
       title: this.title,
       url: "/" + this.id,
     };
+  }
+
+  setRevisedFile(bytes: Uint8Array) {
+    this.revisedFile = bytes;
   }
 
   getUser() {
@@ -421,7 +426,7 @@ export class EditorServer {
             modifyFilter: true,
             protect: true,
             print: true,
-            review: false,
+            review: /^(docx|docm)$/i.test(this.fileType),
             copy: true,
           },
         });
@@ -500,6 +505,12 @@ export class EditorServer {
     const u = new URL(req.url);
 
     const { send } = this;
+
+    if (u.pathname === "/compare-revised" && this.revisedFile) {
+      return new Response(new Blob([this.revisedFile as BlobPart]), {
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+    }
 
     if (u.pathname.includes("/downloadas/")) {
       try {

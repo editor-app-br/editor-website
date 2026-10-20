@@ -46,6 +46,10 @@ import {
 } from "@/utils/attribution";
 import { Loader2 } from "lucide-react";
 
+function isWordCompareType(fileType: string): boolean {
+  return /^(docx|docm)$/i.test(fileType.replace(/^\./, ""));
+}
+
 type PluginHost = {
   onExternalPluginMessage?: (data: Record<string, unknown>) => void;
 };
@@ -624,6 +628,11 @@ export default function EmbedPage() {
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        postToHost({ type: "print" });
+        return;
+      }
       if (e.key === "Escape") postToHost({ type: "escape" });
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -728,7 +737,7 @@ export default function EmbedPage() {
           mime: embedMimeForType(fileMetaRef.current.fileType),
           bytes,
         });
-        postToHost({ type: "dirty", value: false });
+        postToHost({ type: "dirty", value: false, reason: "save" });
       },
       onSaveFailed: (message) => {
         const requestId = saveRequestIdRef.current || undefined;
@@ -809,8 +818,14 @@ export default function EmbedPage() {
       });
 
       win.addEventListener("keydown", (e: KeyboardEvent) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") {
+          e.preventDefault();
+          e.stopPropagation();
+          postToHost({ type: "print" });
+          return;
+        }
         if (e.key === "Escape") postToHost({ type: "escape" });
-      });
+      }, true);
 
       applyEditorChrome(iframeDoc);
       iframe.dataset.jiPatched = "1";
@@ -927,7 +942,7 @@ export default function EmbedPage() {
             chat: false,
             rename: canEdit,
             protect: canEdit,
-            review: false,
+            review: canEdit && isWordCompareType(doc.fileType),
             print: false,
             download: !isPreview,
             plugins: pluginModeRef.current === "agent",
@@ -951,11 +966,16 @@ export default function EmbedPage() {
             compactHeader: true,
             toolbarHideFileName: true,
             hideRightMenu: true,
+            review: {
+              hideReviewDisplay: false,
+              showReviewChanges: true,
+              reviewDisplay: "markup",
+            },
             hideToolbar: isPreview,
             zoom: isPreview ? -1 : 100,
             layout: {
               header: isPreview ? false : { user: false, users: false },
-              leftMenu: !isPreview,
+              leftMenu: false,
               rightMenu: false,
               statusBar: !isPreview,
               toolbar: !isPreview,
@@ -1068,10 +1088,14 @@ export default function EmbedPage() {
             }, 45_000);
           },
           onDocumentStateChange: (e: { data: boolean }) => {
-            if (e.data) {
-              isDirty.current = true;
-              postToHost({ type: "dirty", value: true });
-            }
+            // OnlyOffice: data true means the document has unsaved changes.
+            // data false means there are no changes (including a full undo).
+            isDirty.current = e.data === true;
+            postToHost({
+              type: "dirty",
+              value: e.data === true,
+              reason: e.data ? "edit" : "undo",
+            });
           },
           onError: (e: unknown) => {
             console.error("Editor error", e);
@@ -1208,6 +1232,38 @@ export default function EmbedPage() {
       }, 250);
     };
 
+    const openOnlyOfficeFind = () => {
+      const iframe = document.querySelector('iframe[name="frameEditor"]');
+      const win = iframe?.contentWindow as
+        | (Window & {
+            Asc?: { editor?: { asc_findText?: (text: string, next?: boolean, matchCase?: boolean) => void } };
+          })
+        | null;
+      const doc = iframe?.contentDocument;
+      const labels = ["search", "buscar", "pesquisar", "encontrar", "find"];
+      const button = doc
+        ? Array.from(doc.querySelectorAll<HTMLElement>("button, [role='button']")).find((node) => {
+            const id = (node.id || "").toLowerCase();
+            const hint = (
+              node.getAttribute("data-hint") ||
+              node.getAttribute("title") ||
+              node.getAttribute("aria-label") ||
+              ""
+            ).toLowerCase();
+            return id.includes("search") || labels.some((label) => hint.includes(label));
+          })
+        : undefined;
+      if (button) button.click();
+      else {
+        try {
+          win?.Asc?.editor?.asc_findText?.("", true, false);
+        } catch {
+          /* search panel is optional */
+        }
+      }
+      win?.focus();
+    };
+
     const handleHostMessage = async (event: MessageEvent<HostToEditorMessage>) => {
       const data = event.data;
       // OnlyOffice posts stringified JSON from frameEditor (same origin). Those
@@ -1315,6 +1371,32 @@ export default function EmbedPage() {
         return;
       }
 
+      if (data.type === "compare") {
+        const requestId = data.requestId;
+        try {
+          const editor = editorRef.current;
+          const server = serverRef.current;
+          if (!editor || !server) throw new Error("Abra o documento antes de comparar.");
+          const fileType = String(data.fileType || "").replace(/^\./, "").toLowerCase();
+          if (!isWordCompareType(fileType)) throw new Error("A comparação vale para documentos Word.");
+          const buffer = hostOpenBytes(data);
+          if (!buffer || buffer.byteLength === 0) throw new Error("Versão vazia.");
+          server.setRevisedFile(new Uint8Array(buffer));
+          editor.setRevisedFile({
+            fileType,
+            url: `${location.origin}/compare-revised?t=${Date.now()}`,
+          });
+          postToHost({ type: "compareReady", requestId });
+        } catch (err) {
+          postToHost({
+            type: "compareError",
+            requestId,
+            message: err instanceof Error ? err.message : "Falha ao comparar.",
+          });
+        }
+        return;
+      }
+
       if (data.type === "setTheme") {
         const theme = data.theme === "dark" ? "theme-dark" : "theme-light";
         try {
@@ -1322,6 +1404,11 @@ export default function EmbedPage() {
         } catch {
           /* theme applies on next open */
         }
+        return;
+      }
+
+      if (data.type === "find") {
+        openOnlyOfficeFind();
         return;
       }
 

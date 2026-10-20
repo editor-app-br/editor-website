@@ -44,6 +44,14 @@ export type HostToEditorMessage =
       plugins?: EmbedPluginMode;
     }
   | {
+      type: "compare";
+      requestId: string;
+      fileName: string;
+      fileType: EmbedDocumentType | string;
+      bytes?: ArrayBuffer;
+      bytesB64?: string;
+    }
+  | {
       type: "save";
       requestId: string;
     }
@@ -53,6 +61,9 @@ export type HostToEditorMessage =
     }
   | {
       type: "print";
+    }
+  | {
+      type: "find";
     }
   | {
       type: "destroy";
@@ -66,9 +77,11 @@ export type HostToEditorMessage =
 
 const HOST_TO_EDITOR_TYPES = new Set([
   "open",
+  "compare",
   "save",
   "setTheme",
   "print",
+  "find",
   "destroy",
   "command",
 ]);
@@ -102,8 +115,19 @@ export type EditorToHostMessage =
       diag?: EmbedPluginDiag;
     }
   | {
+      type: "compareReady";
+      requestId: string;
+    }
+  | {
+      type: "compareError";
+      requestId: string;
+      message: string;
+    }
+  | {
       type: "dirty";
       value: boolean;
+      /** edit = modified, undo = OnlyOffice reports no changes, save = bytes were stored. */
+      reason?: "edit" | "undo" | "save";
     }
   | {
       type: "saved";
