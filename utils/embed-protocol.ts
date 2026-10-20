@@ -120,7 +120,7 @@ export type EditorToHostMessage =
     }
   | {
       type: "compareError";
-      requestId: string;
+      requestId?: string;
       message: string;
     }
   | {

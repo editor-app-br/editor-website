@@ -24,6 +24,7 @@ import {
   isHostToEditorMessage,
 } from "@/utils/embed-protocol";
 import { hostOpenBytes } from "@/utils/embed-open-bytes";
+import { compareWordDocument } from "@/utils/editor/compareLocal";
 import { isAllowedEmbedHostOrigin, loadEmbedPartnerConfig } from "@/utils/embed-origins";
 import { injectEmbedChrome, injectPreviewChrome } from "@/utils/embed-chrome";
 import {
@@ -580,6 +581,9 @@ export default function EmbedPage() {
   const fileMetaRef = useRef({ fileName: "document.docx", fileType: "docx" });
   const saveRequestIdRef = useRef<string | null>(null);
   const hostSaveUntilRef = useRef(0);
+  /** Ignore editor dirty/error events caused by applying a comparison. */
+  const compareQuietUntilRef = useRef(0);
+  const comparingRef = useRef(false);
   const hideChromeRef = useRef(false);
   const readyTimerRef = useRef<number | null>(null);
   const openingRef = useRef(false);
@@ -1090,6 +1094,12 @@ export default function EmbedPage() {
           onDocumentStateChange: (e: { data: boolean }) => {
             // OnlyOffice: data true means the document has unsaved changes.
             // data false means there are no changes (including a full undo).
+            // Comparison rewrites the open buffer with review marks. That is a
+            // view, not an edit the host should autosave.
+            if (Date.now() < compareQuietUntilRef.current) {
+              isDirty.current = false;
+              return;
+            }
             isDirty.current = e.data === true;
             postToHost({
               type: "dirty",
@@ -1099,6 +1109,13 @@ export default function EmbedPage() {
           },
           onError: (e: unknown) => {
             console.error("Editor error", e);
+            if (comparingRef.current || Date.now() < compareQuietUntilRef.current) {
+              postToHost({
+                type: "compareError",
+                message: "Não foi possível mostrar as diferenças.",
+              });
+              return;
+            }
             postToHost({ type: "error", message: String(e) });
           },
           onDownloadAs: () => {
@@ -1373,27 +1390,30 @@ export default function EmbedPage() {
 
       if (data.type === "compare") {
         const requestId = data.requestId;
-        try {
-          const editor = editorRef.current;
-          const server = serverRef.current;
-          if (!editor || !server) throw new Error("Abra o documento antes de comparar.");
-          const fileType = String(data.fileType || "").replace(/^\./, "").toLowerCase();
-          if (!isWordCompareType(fileType)) throw new Error("A comparação vale para documentos Word.");
-          const buffer = hostOpenBytes(data);
-          if (!buffer || buffer.byteLength === 0) throw new Error("Versão vazia.");
-          server.setRevisedFile(new Uint8Array(buffer));
-          editor.setRevisedFile({
-            fileType,
-            url: `${location.origin}/compare-revised?t=${Date.now()}`,
-          });
-          postToHost({ type: "compareReady", requestId });
-        } catch (err) {
-          postToHost({
-            type: "compareError",
-            requestId,
-            message: err instanceof Error ? err.message : "Falha ao comparar.",
-          });
-        }
+        void (async () => {
+          comparingRef.current = true;
+          try {
+            const editor = editorRef.current;
+            const server = serverRef.current;
+            if (!editor || !server) throw new Error("Abra o documento antes de comparar.");
+            const fileType = String(data.fileType || "").replace(/^\./, "").toLowerCase();
+            if (!isWordCompareType(fileType)) throw new Error("A comparação vale para documentos Word.");
+            const buffer = hostOpenBytes(data);
+            if (!buffer || buffer.byteLength === 0) throw new Error("Versão vazia.");
+            compareQuietUntilRef.current = Date.now() + 8_000;
+            await compareWordDocument({ bytes: buffer, fileType, server });
+            postToHost({ type: "compareReady", requestId });
+          } catch (err) {
+            compareQuietUntilRef.current = 0;
+            postToHost({
+              type: "compareError",
+              requestId,
+              message: err instanceof Error ? err.message : "Falha ao comparar.",
+            });
+          } finally {
+            comparingRef.current = false;
+          }
+        })();
         return;
       }
 

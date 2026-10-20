@@ -215,6 +215,18 @@ export class EditorServer {
     this.revisedFile = bytes;
   }
 
+  /** Blob URLs for a converted revision, keyed the way OnlyOffice looks up images. */
+  urlsForCompareMedia(media: Record<string, Uint8Array>): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const name of Object.keys(media)) {
+      const clean = name.replace(/^media\//, "");
+      const url = this.addMedia(clean, media[name]);
+      map[clean] = url;
+      map[`media/${clean}`] = url;
+    }
+    return map;
+  }
+
   getUser() {
     return this.user;
   }
