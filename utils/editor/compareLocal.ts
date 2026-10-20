@@ -7,7 +7,40 @@ type CompareFile = {
   IsValid: () => boolean;
 };
 
+type ReviewChangesDialog = {
+  show: (left: number, top: number) => void;
+};
+
+type ReviewChangesController = {
+  dlgChanges?: ReviewChangesDialog;
+  popoverChanges?: unknown;
+  appConfig?: unknown;
+  _state?: { docProtection?: unknown };
+  onApiShowChange?: (changes?: unknown, select?: boolean) => void;
+};
+
+type DeApplication = {
+  getController: (name: string) => ReviewChangesController | null | undefined;
+};
+
 type CompareHost = Window & {
+  DE?: { getApplication: () => DeApplication };
+  $?: (selector: string) => { width: () => number; height: () => number };
+  Common?: {
+    Views: {
+      ReviewChangesDialog: new (options: {
+        popoverChanges?: unknown;
+        mode?: unknown;
+        docProtection?: unknown;
+      }) => ReviewChangesDialog;
+    };
+    Utils: {
+      getOffset: (el: { width: () => number; height: () => number }) => {
+        left: number;
+        top: number;
+      };
+    };
+  };
   editor?: { asc_SetDisplayModeInReview?: (mode: number) => void };
   AscCommonWord?: {
     /** OnlyOffice 9.3: (editorApi, revisedFile). The file alone throws inside the frame. */
@@ -21,6 +54,33 @@ type CompareHost = Window & {
     CollaborativeEditing?: { m_nUseType?: number };
   };
 };
+
+/** Floating "Rever alterações" panel — only after version compare, not on every open. */
+export function openReviewChangesPanel(): void {
+  const frame = document.querySelector<HTMLIFrameElement>('iframe[name="frameEditor"]');
+  const win = frame?.contentWindow as CompareHost | null | undefined;
+  const common = win?.Common;
+  const app = win?.DE?.getApplication();
+  const ctrl = app?.getController("Common.Controllers.ReviewChanges");
+  const jq = win?.$;
+  if (!win || !common || !ctrl || !jq) return;
+
+  if (!ctrl.dlgChanges) {
+    ctrl.dlgChanges = new common.Views.ReviewChangesDialog({
+      popoverChanges: ctrl.popoverChanges,
+      mode: ctrl.appConfig,
+      docProtection: ctrl._state?.docProtection,
+    });
+  }
+
+  const sdk = jq("#editor_sdk");
+  const offset = common.Utils.getOffset(sdk);
+  ctrl.dlgChanges.show(
+    Math.max(10, offset.left + sdk.width() - 300),
+    Math.max(10, offset.top + sdk.height() - 150),
+  );
+  ctrl.onApiShowChange?.();
+}
 
 /**
  * Compare inside the local WASM editor.
@@ -64,6 +124,7 @@ export async function compareWordDocument(options: {
     if (typeof editMode === "number") {
       editorApi.asc_SetDisplayModeInReview?.(editMode);
     }
+    openReviewChangesPanel();
   } finally {
     if (collab && previousUse !== undefined && previousUse !== 1) {
       collab.m_nUseType = previousUse;

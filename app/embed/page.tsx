@@ -982,7 +982,7 @@ export default function EmbedPage() {
             hideRightMenu: true,
             review: {
               hideReviewDisplay: false,
-              showReviewChanges: true,
+              showReviewChanges: false,
               reviewDisplay: "markup",
             },
             hideToolbar: isPreview,
