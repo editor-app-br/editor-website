@@ -733,36 +733,130 @@
       }
 
       if (type === "get_range" || type === "set_range" || type === "goto_cell") {
-        setScope(payload)
+        // callCommand stringifies this function and evals it in the editor.
+        // The outer `type` is not visible there, so the command travels on Asc.scope.
+        setScope({
+          cmd: type,
+          range: payload.range || payload.cell || "A1",
+          cell: payload.cell,
+          sheet: payload.sheet,
+          value: payload.value,
+          values: payload.values,
+          rename: payload.rename
+        })
         callDoc(function () {
           var s = Asc.scope
-          if (typeof Api.GetActiveSheet !== "function") return { error: "Not a spreadsheet." }
+          function originOf(addr) {
+            var head = String(addr || "A1").split(":")[0].replace(/\$/g, "")
+            var match = head.match(/^([A-Za-z]+)(\d+)$/)
+            if (!match) return null
+            var letters = match[1].toUpperCase()
+            var col = 0
+            var i
+            for (i = 0; i < letters.length; i++) col = col * 26 + (letters.charCodeAt(i) - 64)
+            return { col: col - 1, row: parseInt(match[2], 10) - 1 }
+          }
+          function topLeft(value) {
+            var cur = value
+            var guard = 0
+            while (Array.isArray(cur) && guard < 4) {
+              if (!cur.length) return ""
+              cur = cur[0]
+              guard++
+            }
+            return cur
+          }
+          if (typeof Api.GetActiveSheet !== "function") return JSON.stringify({ error: "Not a spreadsheet." })
           var sheet = Api.GetActiveSheet()
           if (s.sheet && Api.GetSheet) {
             var named = Api.GetSheet(s.sheet)
             if (named) sheet = named
           }
-          if (s.sheet && sheet.SetName && type === "goto_cell" && s.rename) sheet.SetName(s.sheet)
+          if (s.sheet && sheet.SetName && s.cmd === "goto_cell" && s.rename) sheet.SetName(s.sheet)
           var addr = s.range || s.cell || "A1"
           var range = sheet.GetRange(addr)
-          if (!range) return { error: "Range not found." }
-          if (type === "get_range") {
-            return {
+          if (!range) return JSON.stringify({ error: "Range not found." })
+          if (s.cmd === "get_range") {
+            return JSON.stringify({
               sheet: sheet.GetName ? sheet.GetName() : s.sheet,
               range: addr,
               values: range.GetValue ? range.GetValue() : null
+            })
+          }
+          if (s.cmd === "set_range") {
+            var raw = s.values != null ? s.values : s.value
+            if (raw == null) return JSON.stringify({ error: "value is required." })
+            var matrix = null
+            if (Array.isArray(raw)) matrix = raw.length && Array.isArray(raw[0]) ? raw : [raw]
+            if (!matrix) {
+              if (!range.SetValue) return JSON.stringify({ error: "SetValue is unavailable." })
+              range.SetValue(raw)
+            } else if (typeof sheet.GetRangeByNumber === "function") {
+              var origin = originOf(addr)
+              if (!origin) return JSON.stringify({ error: "Range not found." })
+              var r
+              var c
+              for (r = 0; r < matrix.length; r++) {
+                var row = matrix[r] || []
+                if (!Array.isArray(row)) row = [row]
+                for (c = 0; c < row.length; c++) {
+                  var cell = sheet.GetRangeByNumber(origin.row + r, origin.col + c)
+                  if (!cell || !cell.SetValue) return JSON.stringify({ error: "Cell not found." })
+                  var piece = row[c]
+                  if (piece == null) piece = ""
+                  cell.SetValue(piece)
+                }
+              }
+            } else if (range.SetValue) {
+              range.SetValue(matrix)
+            } else {
+              return JSON.stringify({ error: "SetValue is unavailable." })
+            }
+            var got = range.GetValue ? range.GetValue() : null
+            var expect = matrix ? (matrix[0] && matrix[0].length ? matrix[0][0] : "") : raw
+            var formula = typeof expect === "string" && expect.charAt(0) === "="
+            if (!formula && String(topLeft(got)) !== String(expect == null ? "" : expect)) {
+              return JSON.stringify({
+                error: "Cell was not updated.",
+                range: addr,
+                expected: expect,
+                actual: topLeft(got)
+              })
+            }
+            return JSON.stringify({
+              sheet: sheet.GetName ? sheet.GetName() : s.sheet,
+              range: addr,
+              wrote: true,
+              values: got
+            })
+          }
+          if (s.cmd === "goto_cell") {
+            if (range.Select) range.Select()
+            return JSON.stringify({ sheet: sheet.GetName ? sheet.GetName() : s.sheet, range: addr })
+          }
+          return JSON.stringify({ error: "Unsupported sheet command." })
+        }, function (info, error) {
+          if (error) {
+            reply(requestId, null, error)
+            return
+          }
+          var parsed = info
+          if (typeof info === "string") {
+            try {
+              parsed = JSON.parse(info)
+            } catch (err) {
+              parsed = null
             }
           }
-          if (type === "set_range") {
-            var values = s.values != null ? s.values : s.value
-            if (range.SetValue) range.SetValue(values)
-            return { sheet: sheet.GetName ? sheet.GetName() : s.sheet, range: addr, wrote: true }
+          if (parsed && parsed.onlyoffice_id_error_message) {
+            reply(requestId, null, String(parsed.onlyoffice_id_error_message))
+            return
           }
-          if (range.Select) range.Select()
-          return { sheet: sheet.GetName ? sheet.GetName() : s.sheet, range: addr }
-        }, function (info) {
-          if (info && info.error) reply(requestId, null, info.error)
-          else reply(requestId, info || { ok: true })
+          if (!parsed || parsed.error) {
+            reply(requestId, null, (parsed && parsed.error) || "Spreadsheet command did not run.")
+            return
+          }
+          reply(requestId, parsed)
         })
         return
       }
