@@ -179,41 +179,53 @@
     return scope
   }
 
-  function callDoc(fn, done) {
-    var finished = false
-    var timer = window.setTimeout(function () {
-      if (finished) return
-      finished = true
-      done(undefined, "OnlyOffice callCommand timeout.")
-    }, 10000)
-    function finish(value, error) {
-      if (finished) return
-      finished = true
-      window.clearTimeout(timer)
-      done(value, error)
-    }
-    try {
-      if (!window.Asc || !window.Asc.plugin) {
-        finish(undefined, "Asc.plugin missing.")
-        return
+  function callDoc(fn, done, opts) {
+    var timeoutMs = opts && opts.timeoutMs ? opts.timeoutMs : 20000
+    var retriesLeft = opts && opts.retries != null ? opts.retries : 0
+    function attempt(left) {
+      var finished = false
+      var timer = window.setTimeout(function () {
+        if (finished) return
+        finished = true
+        if (left > 0) {
+          attempt(left - 1)
+          return
+        }
+        done(
+          undefined,
+          "OnlyOffice callCommand timeout. Editor may still be loading after open; retry once or wait for ready."
+        )
+      }, timeoutMs)
+      function finish(value, error) {
+        if (finished) return
+        finished = true
+        window.clearTimeout(timer)
+        done(value, error)
       }
-      if (typeof window.Asc.plugin.callCommand !== "function") {
-        finish(undefined, "callCommand unavailable.")
-        return
-      }
-      if (!window.Asc.plugin.info) window.Asc.plugin.info = {}
-      // Sub-window frames refuse callCommand/executeMethod ("does not allow in window frame").
       try {
-        delete window.Asc.plugin.windowID
+        if (!window.Asc || !window.Asc.plugin) {
+          finish(undefined, "Asc.plugin missing.")
+          return
+        }
+        if (typeof window.Asc.plugin.callCommand !== "function") {
+          finish(undefined, "callCommand unavailable.")
+          return
+        }
+        if (!window.Asc.plugin.info) window.Asc.plugin.info = {}
+        // Sub-window frames refuse callCommand/executeMethod ("does not allow in window frame").
+        try {
+          delete window.Asc.plugin.windowID
+        } catch (err) {
+          window.Asc.plugin.windowID = undefined
+        }
+        window.Asc.plugin.callCommand(fn, false, true, function (value) {
+          finish(value)
+        })
       } catch (err) {
-        window.Asc.plugin.windowID = undefined
+        finish(undefined, err && err.message ? err.message : String(err))
       }
-      window.Asc.plugin.callCommand(fn, false, true, function (value) {
-        finish(value)
-      })
-    } catch (err) {
-      finish(undefined, err && err.message ? err.message : String(err))
     }
+    attempt(retriesLeft)
   }
 
   function runMethod(name, params, done) {
@@ -642,7 +654,26 @@
       }
 
       if (type === "goto" || type === "select") {
-        setScope(Object.assign({ kind: type }, payload))
+        var headingText = ""
+        if (payload.heading != null && String(payload.heading).trim()) {
+          headingText = String(payload.heading).trim()
+        } else if (payload.text != null && String(payload.text).trim()) {
+          headingText = String(payload.text).trim()
+        }
+        var rawIndex = payload.index
+        // Prefer heading when the model sends index 0 as a default alongside text.
+        var useHeading =
+          !!headingText &&
+          (rawIndex == null ||
+            rawIndex === "" ||
+            (type === "goto" && Number(rawIndex) === 0))
+        setScope({
+          kind: type,
+          heading: useHeading ? headingText : headingText || null,
+          index: useHeading ? null : rawIndex,
+          page: payload.page,
+          target: payload.target
+        })
         if (payload.target === "all" && type === "select") {
           runMethod("SelectAll", [], function (_value, error) {
             if (error) reply(requestId, null, error)
@@ -650,32 +681,38 @@
           })
           return
         }
-        callDoc(function () {
-          var s = Asc.scope
-          var doc = Api.GetDocument()
-          var index = s.index
-          if (s.heading != null && index == null) {
-            var needle = String(s.heading).toLowerCase()
-            var n = doc.GetElementsCount()
-            var i
-            for (i = 0; i < n; i++) {
-              var el = doc.GetElement(i)
-              var text = el && el.GetText ? String(el.GetText()).toLowerCase() : ""
-              if (text.indexOf(needle) >= 0) {
-                index = i
-                break
+        callDoc(
+          function () {
+            var s = Asc.scope
+            var doc = Api.GetDocument()
+            var index = s.index
+            var heading =
+              s.heading != null && String(s.heading).trim() ? String(s.heading).trim() : ""
+            if (heading && (index == null || index === "")) {
+              var needle = heading.toLowerCase()
+              var n = doc.GetElementsCount()
+              var i
+              for (i = 0; i < n; i++) {
+                var el = doc.GetElement(i)
+                var text = el && el.GetText ? String(el.GetText()).toLowerCase() : ""
+                if (text.indexOf(needle) >= 0) {
+                  index = i
+                  break
+                }
               }
             }
-          }
-          if (index == null) index = 0
-          var target = doc.GetElement(Number(index))
-          if (!target) return false
-          if (target.Select) target.Select()
-          return { index: Number(index) }
-        }, function (info, error) {
-          if (error) reply(requestId, null, error)
-          else reply(requestId, info || { ok: true })
-        })
+            if (index == null || index === "") index = 0
+            var target = doc.GetElement(Number(index))
+            if (!target) return false
+            if (target.Select) target.Select()
+            return { index: Number(index), heading: heading || null }
+          },
+          function (info, error) {
+            if (error) reply(requestId, null, error)
+            else reply(requestId, info || { ok: true })
+          },
+          { timeoutMs: 20000, retries: 1 }
+        )
         return
       }
 
