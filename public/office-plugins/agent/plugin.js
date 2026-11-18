@@ -290,7 +290,8 @@
         // For table placement, prefer a heading that actually has a following table.
         if (placement === "before_table" || placement === "after_table") {
           var look
-          for (look = hi + (isTableElement(el) ? 0 : 1); look < n && look < hi + 40; look++) {
+          // Prefer a match that has a *following* table (skip self when match is a table).
+          for (look = hi + 1; look < n && look < hi + 40; look++) {
             if (isTableElement(doc.GetElement(look))) {
               score += 80
               break
@@ -319,7 +320,13 @@
       index != null &&
       !isNaN(index)
     ) {
-      var start = isTableElement(doc.GetElement(index)) ? index : index + 1
+      // table_index already names the target table. Heading matches that live
+      // inside a table (RAC-style forms) must advance to the *following* table
+      // (e.g. monthly grid after the 2.2.1 section table), not the same one.
+      var resolvedViaTableIndex = tableIndex != null && !isNaN(tableIndex)
+      // Heading/paragraph path: always search from the next element so a
+      // section table that contains "2.2.1" does not become the insert target.
+      var start = resolvedViaTableIndex ? index : index + 1
       var tj
       var foundTable = null
       for (tj = start; tj < n; tj++) {
@@ -681,10 +688,14 @@
                 })
                 continue
               }
-              // Forms like RAC use numbered Normal paragraphs ("2.2.1 INCLUIR"), not Heading styles.
+              // Forms like RAC: numbered titles are often Normal paragraphs OR the
+              // first lines inside a wrapping table (not Heading styles).
               var trimmed = String(headingText || preview || "").trim()
+              if (isTable) {
+                var firstLine = trimmed.split(/\r?\n/)[0] || ""
+                trimmed = firstLine.trim()
+              }
               if (
-                !isTable &&
                 trimmed.length > 0 &&
                 trimmed.length < 160 &&
                 /^\d+(\.\d+){0,5}\.?\s+\S/.test(trimmed)
