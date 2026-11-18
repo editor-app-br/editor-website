@@ -158,6 +158,228 @@
     return parseInlineMarkup(text)
   }
 
+  function isTableElement(el) {
+    if (!el) return false
+    if (typeof el.GetRow === "function") return true
+    var klass = el.GetClassType ? String(el.GetClassType()) : ""
+    return klass.toLowerCase().indexOf("table") >= 0
+  }
+
+  function tablePreviewText(table) {
+    if (!table || typeof table.GetRow !== "function") return ""
+    var rows = []
+    var r
+    var max = typeof table.GetRowsCount === "function" ? Math.min(table.GetRowsCount(), 6) : 6
+    for (r = 0; r < max; r++) {
+      var row = table.GetRow(r)
+      if (!row) break
+      var cells = []
+      var c
+      var cols = typeof row.GetCellsCount === "function" ? Math.min(row.GetCellsCount(), 8) : 8
+      for (c = 0; c < cols; c++) {
+        var cell = row.GetCell(c)
+        if (!cell) break
+        var content = cell.GetContent && cell.GetContent()
+        var para = content && content.GetElement ? content.GetElement(0) : null
+        cells.push(para && para.GetText ? String(para.GetText()) : "")
+      }
+      rows.push(cells.join(" | "))
+    }
+    return rows.join("\n")
+  }
+
+  function elementText(el) {
+    if (!el) return ""
+    if (isTableElement(el)) return tablePreviewText(el)
+    if (typeof el.GetText === "function") return String(el.GetText() || "")
+    return ""
+  }
+
+  function elementStyleName(el) {
+    if (!el || typeof el.GetStyle !== "function") return ""
+    var style = el.GetStyle()
+    return style && typeof style.GetName === "function" ? String(style.GetName()) : ""
+  }
+
+  function normalizePlacement(raw) {
+    var value = String(raw == null ? "" : raw)
+      .trim()
+      .toLowerCase()
+      .replace(/-/g, "_")
+    if (!value || value === "cursor") return "cursor"
+    if (value === "before" || value === "before_element") return "before"
+    if (value === "after" || value === "after_element") return "after"
+    if (
+      value === "before_table" ||
+      value === "before_next_table" ||
+      value === "before_following_table"
+    ) {
+      return "before_table"
+    }
+    if (value === "after_table" || value === "after_next_table") return "after_table"
+    return value
+  }
+
+  /**
+   * Resolve a document element index for navigation/insert.
+   * Never defaults to 0 when a heading/table target was requested but missing.
+   */
+  function resolveDocTarget(doc, opts) {
+    var n = doc.GetElementsCount ? doc.GetElementsCount() : 0
+    var placement = normalizePlacement(opts && opts.placement)
+    var heading =
+      opts && opts.heading != null && String(opts.heading).trim()
+        ? String(opts.heading).trim()
+        : ""
+    var tableIndex =
+      opts && opts.table_index != null && opts.table_index !== ""
+        ? Number(opts.table_index)
+        : null
+    var index =
+      opts && opts.index != null && opts.index !== "" ? Number(opts.index) : null
+    var targetKind =
+      opts && opts.target != null ? String(opts.target).trim().toLowerCase() : ""
+
+    if (tableIndex != null && !isNaN(tableIndex)) {
+      var tableOrdinal = -1
+      var ti
+      for (ti = 0; ti < n; ti++) {
+        if (!isTableElement(doc.GetElement(ti))) continue
+        tableOrdinal += 1
+        // table_index is 0-based among tables only (see get_outline.tables).
+        if (tableOrdinal === tableIndex) {
+          index = ti
+          break
+        }
+      }
+      if (index == null || isNaN(index)) {
+        return { ok: false, error: "Table not found (table_index=" + tableIndex + ")." }
+      }
+    }
+
+    if (heading && (index == null || isNaN(index))) {
+      var needle = heading.toLowerCase()
+      var hi
+      for (hi = 0; hi < n; hi++) {
+        var text = elementText(doc.GetElement(hi)).toLowerCase()
+        if (text.indexOf(needle) >= 0) {
+          index = hi
+          break
+        }
+      }
+      if (index == null || isNaN(index)) {
+        return { ok: false, error: "Heading/text not found: " + heading }
+      }
+    }
+
+    if (targetKind === "table" && (index == null || isNaN(index))) {
+      return { ok: false, error: "Pass table_index or heading to target a table." }
+    }
+
+    if (
+      (placement === "before_table" || placement === "after_table") &&
+      index != null &&
+      !isNaN(index)
+    ) {
+      var start = isTableElement(doc.GetElement(index)) ? index : index + 1
+      var tj
+      var foundTable = null
+      for (tj = start; tj < n; tj++) {
+        if (isTableElement(doc.GetElement(tj))) {
+          foundTable = tj
+          break
+        }
+      }
+      if (foundTable == null) {
+        return {
+          ok: false,
+          error: "No table found after the target (placement=" + placement + ")."
+        }
+      }
+      index = foundTable
+    }
+
+    if (index == null || isNaN(index)) {
+      if (heading || tableIndex != null || targetKind === "table" || placement.indexOf("table") >= 0) {
+        return { ok: false, error: "Target not found in document." }
+      }
+      return { ok: false, error: "Pass heading, index, or table_index (no silent start-of-document)." }
+    }
+
+    if (index < 0 || index >= n) {
+      return { ok: false, error: "Element index out of range: " + index }
+    }
+
+    var insertAt = index
+    if (placement === "after" || placement === "after_table") insertAt = index + 1
+    if (placement === "before" || placement === "before_table") insertAt = index
+
+    return {
+      ok: true,
+      index: index,
+      insert_at: insertAt,
+      placement: placement,
+      heading: heading || null,
+      type: isTableElement(doc.GetElement(index)) ? "table" : "paragraph"
+    }
+  }
+
+  function selectAtElementStart(el) {
+    if (!el) return false
+    if (typeof el.GetRange === "function") {
+      try {
+        var range = el.GetRange(0, 0)
+        if (range && typeof range.Select === "function") {
+          range.Select()
+          return true
+        }
+      } catch (err) {}
+    }
+    if (typeof el.Select === "function") {
+      el.Select()
+      return true
+    }
+    return false
+  }
+
+  function insertParasAt(doc, paras, insertAt, placement) {
+    if (!paras || !paras.length) return false
+    var usePos =
+      placement === "before" ||
+      placement === "after" ||
+      placement === "before_table" ||
+      placement === "after_table"
+    if (usePos && typeof doc.AddElement === "function" && insertAt != null) {
+      var i
+      // AddElement(nPos) inserts before the current element at nPos; add last→first.
+      for (i = paras.length - 1; i >= 0; i--) {
+        doc.AddElement(insertAt, paras[i])
+      }
+      return true
+    }
+    if (typeof doc.InsertContent === "function") {
+      doc.InsertContent(paras)
+      return true
+    }
+    return false
+  }
+
+  function replyCommand(requestId, info, error) {
+    if (error) {
+      reply(requestId, null, error)
+      return
+    }
+    if (info === false || info == null) {
+      reply(requestId, null, "Target not found in document.")
+      return
+    }
+    if (typeof info === "object" && info.ok === false) {
+      reply(requestId, null, info.error || "Target not found in document.")
+      return
+    }
+    reply(requestId, info)
+  }
+
   function setScope(values) {
     if (!window.Asc) window.Asc = {}
     // Never replace Asc.scope: callCommand does JSON.stringify(window.Asc.scope).
@@ -346,30 +568,64 @@
       }
 
       if (type === "get_outline") {
-        callDoc(function () {
-          if (typeof Api.GetDocument !== "function") return []
-          var doc = Api.GetDocument()
-          var items = []
-          var n = doc.GetElementsCount()
-          var i
-          for (i = 0; i < n; i++) {
-            var el = doc.GetElement(i)
-            if (!el || typeof el.GetStyle !== "function") continue
-            var style = el.GetStyle()
-            var name = style && typeof style.GetName === "function" ? String(style.GetName()) : ""
-            var match = name.match(/heading\s*(\d)|t[ií]tulo\s*(\d)/i)
-            if (!match) continue
-            items.push({
-              level: parseInt(match[1] || match[2], 10),
-              text: typeof el.GetText === "function" ? el.GetText() : "",
-              index: i
-            })
-          }
-          return items
-        }, function (items, error) {
-          if (error) reply(requestId, null, error)
-          else reply(requestId, { outline: items || [] })
-        })
+        callDoc(
+          function () {
+            if (typeof Api.GetDocument !== "function") {
+              return { outline: [], elements: [], tables: [] }
+            }
+            var doc = Api.GetDocument()
+            var items = []
+            var elements = []
+            var tables = []
+            var tableOrdinal = 0
+            var n = doc.GetElementsCount()
+            var i
+            for (i = 0; i < n; i++) {
+              var el = doc.GetElement(i)
+              if (!el) continue
+              var preview = elementText(el)
+              var styleName = elementStyleName(el)
+              var isTable = isTableElement(el)
+              var row = {
+                index: i,
+                type: isTable ? "table" : "paragraph",
+                text: preview.length > 240 ? preview.slice(0, 240) : preview,
+                style: styleName || null
+              }
+              if (isTable) {
+                row.table_index = tableOrdinal
+                tables.push({
+                  index: i,
+                  table_index: tableOrdinal,
+                  text: row.text
+                })
+                tableOrdinal += 1
+              }
+              elements.push(row)
+              var match = styleName.match(/heading\s*(\d)|t[ií]tulo\s*(\d)/i)
+              if (!match) continue
+              items.push({
+                level: parseInt(match[1] || match[2], 10),
+                text: typeof el.GetText === "function" ? el.GetText() : preview,
+                index: i
+              })
+            }
+            return { outline: items, elements: elements, tables: tables }
+          },
+          function (info, error) {
+            if (error) reply(requestId, null, error)
+            else {
+              var body = info && typeof info === "object" ? info : { outline: info || [] }
+              if (Array.isArray(body)) body = { outline: body, elements: [], tables: [] }
+              reply(requestId, {
+                outline: body.outline || [],
+                elements: body.elements || [],
+                tables: body.tables || []
+              })
+            }
+          },
+          { timeoutMs: 20000, retries: 1 }
+        )
         return
       }
 
@@ -384,6 +640,20 @@
       if (type === "insert_text" || type === "type" || type === "replace_selection") {
         var insert = normalizeNewlines(payload.text || "")
         var markup = paragraphsFromPayload(payload, insert)
+        var insertPlacement = normalizePlacement(payload.placement || payload.at)
+        var hasTarget =
+          !!(
+            (payload.heading != null && String(payload.heading).trim()) ||
+            (payload.text_target != null && String(payload.text_target).trim()) ||
+            (payload.table_index != null && payload.table_index !== "") ||
+            (payload.index != null &&
+              payload.index !== "" &&
+              insertPlacement !== "cursor") ||
+            insertPlacement === "before" ||
+            insertPlacement === "after" ||
+            insertPlacement === "before_table" ||
+            insertPlacement === "after_table"
+          )
         var needsFormat = !!(
           markup.hasMarkup ||
           payload.font ||
@@ -397,9 +667,10 @@
           payload.align ||
           payload.style ||
           payload.list ||
-          payload.break
+          payload.break ||
+          hasTarget
         )
-        // Plain text: PasteText (string arg). Wrong InputText([{text}]) never completes.
+        // Plain text at the live cursor: PasteText. Targeted placement uses callDoc + AddElement.
         if (!needsFormat) {
           runMethod("PasteText", [insert], function (_value, error) {
             if (error) reply(requestId, null, error)
@@ -422,7 +693,17 @@
           align: payload.align,
           style: payload.style,
           list: payload.list,
-          break: payload.break
+          break: payload.break,
+          placement: insertPlacement,
+          heading:
+            payload.heading != null && String(payload.heading).trim()
+              ? String(payload.heading).trim()
+              : payload.text_target != null && String(payload.text_target).trim()
+                ? String(payload.text_target).trim()
+                : null,
+          index: payload.index,
+          table_index: payload.table_index,
+          target: payload.target
         })
         callDoc(function () {
           var s = Asc.scope
@@ -457,17 +738,47 @@
           if (typeof Api.GetPresentation === "function" && typeof Api.GetDocument !== "function") {
             var pres = Api.GetPresentation()
             var slide = pres.GetCurrentSlide ? pres.GetCurrentSlide() : null
-            if (!slide) return false
+            if (!slide) return { ok: false, error: "No slide." }
             var shape = typeof Api.CreateShape === "function" ? Api.CreateShape("rect", 100 * 36000, 40 * 36000) : null
-            if (!shape) return false
+            if (!shape) return { ok: false, error: "CreateShape unavailable." }
             var box = shape.GetDocContent && shape.GetDocContent()
             var slidePara = box && box.GetElement ? box.GetElement(0) : null
             if (slidePara && slidePara.AddText) slidePara.AddText(plainFromParagraphs(s.paragraphs) || s.text || "")
             if (slide.AddObject) slide.AddObject(shape)
-            return true
+            return { ok: true, inserted: (s.text || "").length }
           }
-          if (typeof Api.GetDocument !== "function") return false
+          if (typeof Api.GetDocument !== "function") return { ok: false, error: "No document." }
           var doc = Api.GetDocument()
+          var placement = normalizePlacement(s.placement)
+          var resolved = null
+          var wantsTarget =
+            placement === "before" ||
+            placement === "after" ||
+            placement === "before_table" ||
+            placement === "after_table" ||
+            (s.heading && String(s.heading).trim()) ||
+            (s.table_index != null && s.table_index !== "") ||
+            (s.index != null && s.index !== "" && placement !== "cursor")
+          if (wantsTarget) {
+            var effectivePlacement = placement
+            if (
+              effectivePlacement === "cursor" &&
+              ((s.heading && String(s.heading).trim()) ||
+                (s.table_index != null && s.table_index !== "") ||
+                (s.index != null && s.index !== ""))
+            ) {
+              // Heading/table without explicit placement → insert before that element.
+              effectivePlacement = "before"
+            }
+            resolved = resolveDocTarget(doc, {
+              heading: s.heading,
+              index: s.index,
+              table_index: s.table_index,
+              target: s.target,
+              placement: effectivePlacement
+            })
+            if (!resolved.ok) return resolved
+          }
           var blocks = s.paragraphs
           if (!blocks || !blocks.length) {
             var lines = String(s.text || "").split("\n")
@@ -513,12 +824,29 @@
             }
             paras.push(para)
           }
+          if (resolved) {
+            if (!insertParasAt(doc, paras, resolved.insert_at, resolved.placement)) {
+              return { ok: false, error: "AddElement/InsertContent unavailable." }
+            }
+            return {
+              ok: true,
+              inserted: (s.text || "").length,
+              index: resolved.index,
+              insert_at: resolved.insert_at,
+              placement: resolved.placement,
+              type: resolved.type
+            }
+          }
           if (doc.InsertContent) doc.InsertContent(paras)
-          return true
-        }, function (ok, error) {
-          if (error) reply(requestId, null, error)
-          else if (type === "replace_selection") reply(requestId, { replaced: ok !== false })
-          else reply(requestId, { inserted: insert.length, ok: ok !== false })
+          return { ok: true, inserted: (s.text || "").length, placement: "cursor" }
+        }, function (info, error) {
+          if (type === "replace_selection") {
+            if (error) reply(requestId, null, error)
+            else if (info && info.ok === false) reply(requestId, null, info.error || "Replace failed.")
+            else reply(requestId, { replaced: true })
+            return
+          }
+          replyCommand(requestId, info, error)
         })
         return
       }
@@ -661,6 +989,7 @@
           headingText = String(payload.text).trim()
         }
         var rawIndex = payload.index
+        var placement = normalizePlacement(payload.placement || payload.at)
         // Prefer heading when the model sends index 0 as a default alongside text.
         var useHeading =
           !!headingText &&
@@ -671,8 +1000,10 @@
           kind: type,
           heading: useHeading ? headingText : headingText || null,
           index: useHeading ? null : rawIndex,
+          table_index: payload.table_index,
           page: payload.page,
-          target: payload.target
+          target: payload.target,
+          placement: placement
         })
         if (payload.target === "all" && type === "select") {
           runMethod("SelectAll", [], function (_value, error) {
@@ -685,31 +1016,62 @@
           function () {
             var s = Asc.scope
             var doc = Api.GetDocument()
-            var index = s.index
-            var heading =
-              s.heading != null && String(s.heading).trim() ? String(s.heading).trim() : ""
-            if (heading && (index == null || index === "")) {
-              var needle = heading.toLowerCase()
-              var n = doc.GetElementsCount()
-              var i
-              for (i = 0; i < n; i++) {
-                var el = doc.GetElement(i)
-                var text = el && el.GetText ? String(el.GetText()).toLowerCase() : ""
-                if (text.indexOf(needle) >= 0) {
-                  index = i
-                  break
+            var resolved = resolveDocTarget(doc, {
+              heading: s.heading,
+              index: s.index,
+              table_index: s.table_index,
+              target: s.target,
+              placement: s.placement
+            })
+            if (!resolved.ok) return resolved
+            var target = doc.GetElement(resolved.index)
+            if (!target) return { ok: false, error: "Element missing at index " + resolved.index }
+            // before/before_table: park the caret on the previous element so a following
+            // PasteText/InsertContent does not land inside the table. Prefer atomic
+            // doc_insert_text with placement=before_table (AddElement) for markers.
+            if (resolved.placement === "before" || resolved.placement === "before_table") {
+              if (resolved.index > 0) {
+                var prev = doc.GetElement(resolved.index - 1)
+                if (prev) {
+                  if (typeof prev.GetRange === "function") {
+                    var prevText =
+                      typeof prev.GetText === "function" ? String(prev.GetText() || "") : ""
+                    try {
+                      var endRange = prev.GetRange(prevText.length, prevText.length)
+                      if (endRange && typeof endRange.Select === "function") endRange.Select()
+                      else selectAtElementStart(prev)
+                    } catch (err) {
+                      selectAtElementStart(prev)
+                    }
+                  } else if (prev.Select) {
+                    prev.Select()
+                  }
+                } else {
+                  selectAtElementStart(target)
                 }
+              } else {
+                selectAtElementStart(target)
               }
+            } else if (resolved.placement === "after" || resolved.placement === "after_table") {
+              var next = doc.GetElement(resolved.insert_at)
+              if (next) selectAtElementStart(next)
+              else if (target.Select) target.Select()
+            } else if (s.kind === "select" && target.Select) {
+              target.Select()
+            } else {
+              selectAtElementStart(target)
             }
-            if (index == null || index === "") index = 0
-            var target = doc.GetElement(Number(index))
-            if (!target) return false
-            if (target.Select) target.Select()
-            return { index: Number(index), heading: heading || null }
+            return {
+              ok: true,
+              index: resolved.index,
+              insert_at: resolved.insert_at,
+              placement: resolved.placement,
+              heading: resolved.heading,
+              type: resolved.type
+            }
           },
           function (info, error) {
-            if (error) reply(requestId, null, error)
-            else reply(requestId, info || { ok: true })
+            replyCommand(requestId, info, error)
           },
           { timeoutMs: 20000, retries: 1 }
         )
