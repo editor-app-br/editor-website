@@ -206,17 +206,30 @@
       .trim()
       .toLowerCase()
       .replace(/-/g, "_")
+      .replace(/\s+/g, "_")
     if (!value || value === "cursor") return "cursor"
     if (value === "before" || value === "before_element") return "before"
     if (value === "after" || value === "after_element") return "after"
     if (
       value === "before_table" ||
       value === "before_next_table" ||
-      value === "before_following_table"
+      value === "before_following_table" ||
+      value === "antes_da_tabela" ||
+      value === "antes_tabela" ||
+      value.indexOf("before_table") === 0
     ) {
       return "before_table"
     }
-    if (value === "after_table" || value === "after_next_table") return "after_table"
+    if (
+      value === "after_table" ||
+      value === "after_next_table" ||
+      value === "depois_da_tabela" ||
+      value === "apos_a_tabela" ||
+      value === "após_a_tabela" ||
+      value.indexOf("after_table") === 0
+    ) {
+      return "after_table"
+    }
     return value
   }
 
@@ -260,16 +273,41 @@
     if (heading && (index == null || isNaN(index))) {
       var needle = heading.toLowerCase()
       var hi
+      var best = null
+      var bestScore = -1
       for (hi = 0; hi < n; hi++) {
-        var text = elementText(doc.GetElement(hi)).toLowerCase()
-        if (text.indexOf(needle) >= 0) {
-          index = hi
-          break
+        var el = doc.GetElement(hi)
+        var text = elementText(el).toLowerCase().trim()
+        if (text.indexOf(needle) < 0) continue
+        // Prefer exact / heading-styled matches over early TOC substring hits.
+        var score = 0
+        if (text === needle) score += 100
+        else if (text.indexOf(needle) === 0) score += 40
+        var styleName = elementStyleName(el).toLowerCase()
+        if (styleName.indexOf("heading") >= 0 || styleName.indexOf("título") >= 0 || styleName.indexOf("titulo") >= 0) {
+          score += 50
+        }
+        // For table placement, prefer a heading that actually has a following table.
+        if (placement === "before_table" || placement === "after_table") {
+          var look
+          for (look = hi + (isTableElement(el) ? 0 : 1); look < n && look < hi + 40; look++) {
+            if (isTableElement(doc.GetElement(look))) {
+              score += 80
+              break
+            }
+          }
+        }
+        // Slight preference for later body matches over front-matter/TOC.
+        score += Math.min(hi, 30) / 30
+        if (score > bestScore) {
+          bestScore = score
+          best = hi
         }
       }
-      if (index == null || isNaN(index)) {
+      if (best == null) {
         return { ok: false, error: "Heading/text not found: " + heading }
       }
+      index = best
     }
 
     if (targetKind === "table" && (index == null || isNaN(index))) {
@@ -344,19 +382,23 @@
 
   function insertParasAt(doc, paras, insertAt, placement) {
     if (!paras || !paras.length) return false
+    var pos = insertAt == null || insertAt === "" ? null : Number(insertAt)
+    // When a target index was resolved, ALWAYS use AddElement — never fall back to
+    // InsertContent at the live cursor (that re-introduced markers at document start).
+    if (pos != null && !isNaN(pos) && typeof doc.AddElement === "function") {
+      var i
+      // AddElement(nPos) inserts before the current element at nPos; add last→first.
+      for (i = paras.length - 1; i >= 0; i--) {
+        doc.AddElement(pos, paras[i])
+      }
+      return true
+    }
     var usePos =
       placement === "before" ||
       placement === "after" ||
       placement === "before_table" ||
       placement === "after_table"
-    if (usePos && typeof doc.AddElement === "function" && insertAt != null) {
-      var i
-      // AddElement(nPos) inserts before the current element at nPos; add last→first.
-      for (i = paras.length - 1; i >= 0; i--) {
-        doc.AddElement(insertAt, paras[i])
-      }
-      return true
-    }
+    if (usePos) return false
     if (typeof doc.InsertContent === "function") {
       doc.InsertContent(paras)
       return true
