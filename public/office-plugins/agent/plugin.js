@@ -443,6 +443,31 @@
     return scope
   }
 
+  /**
+   * OnlyOffice callCommand stringifies the function and evals it in the document
+   * frame — outer plugin closures are NOT available there. Bake helpers into the
+   * command source so get_outline / resolveDocTarget / inserts keep working.
+   */
+  function buildDocCommand(fn) {
+    var helpers = [
+      isTableElement,
+      tablePreviewText,
+      elementText,
+      elementStyleName,
+      normalizePlacement,
+      resolveDocTarget,
+      selectAtElementStart,
+      insertParasAt
+    ]
+      .map(function (f) {
+        return f.toString()
+      })
+      .join("\n")
+    return new Function(
+      helpers + "\nreturn (" + fn.toString() + ").apply(this, arguments);"
+    )
+  }
+
   function callDoc(fn, done, opts) {
     var timeoutMs = opts && opts.timeoutMs ? opts.timeoutMs : 20000
     var retriesLeft = opts && opts.retries != null ? opts.retries : 0
@@ -482,7 +507,8 @@
         } catch (err) {
           window.Asc.plugin.windowID = undefined
         }
-        window.Asc.plugin.callCommand(fn, false, true, function (value) {
+        var command = buildDocCommand(fn)
+        window.Asc.plugin.callCommand(command, false, true, function (value) {
           finish(value)
         })
       } catch (err) {
@@ -645,18 +671,43 @@
               }
               elements.push(row)
               var match = styleName.match(/heading\s*(\d)|t[ií]tulo\s*(\d)/i)
-              if (!match) continue
-              items.push({
-                level: parseInt(match[1] || match[2], 10),
-                text: typeof el.GetText === "function" ? el.GetText() : preview,
-                index: i
-              })
+              var headingText =
+                typeof el.GetText === "function" ? String(el.GetText() || "") : preview
+              if (match) {
+                items.push({
+                  level: parseInt(match[1] || match[2], 10),
+                  text: headingText,
+                  index: i
+                })
+                continue
+              }
+              // Forms like RAC use numbered Normal paragraphs ("2.2.1 INCLUIR"), not Heading styles.
+              var trimmed = String(headingText || preview || "").trim()
+              if (
+                !isTable &&
+                trimmed.length > 0 &&
+                trimmed.length < 160 &&
+                /^\d+(\.\d+){0,5}\.?\s+\S/.test(trimmed)
+              ) {
+                var dots = (trimmed.match(/\./g) || []).length
+                items.push({
+                  level: Math.min(dots + 1, 9),
+                  text: trimmed,
+                  index: i
+                })
+              }
             }
             return { outline: items, elements: elements, tables: tables }
           },
           function (info, error) {
             if (error) reply(requestId, null, error)
-            else {
+            else if (info == null) {
+              reply(
+                requestId,
+                null,
+                "get_outline returned empty (document command failed)."
+              )
+            } else {
               var body = info && typeof info === "object" ? info : { outline: info || [] }
               if (Array.isArray(body)) body = { outline: body, elements: [], tables: [] }
               reply(requestId, {
