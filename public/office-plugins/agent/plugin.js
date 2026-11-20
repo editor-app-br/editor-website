@@ -195,6 +195,89 @@
     return ""
   }
 
+  function clipText(text, limit) {
+    var value = String(text == null ? "" : text)
+    var max = limit || 500
+    if (value.length <= max) return value
+    return value.slice(0, max) + "…"
+  }
+
+  /**
+   * Stable Agent "lines": one per top-level document element, same order as
+   * doc_get_outline.elements. line is 1-based; element_index is 0-based (pass
+   * to doc_goto / doc_select). Tables are one line (preview text only — edit
+   * cells with table_index + row + col tools).
+   */
+  function listLogicalLines(doc) {
+    var lines = []
+    var n = doc.GetElementsCount ? doc.GetElementsCount() : 0
+    var tableOrdinal = -1
+    var i
+    for (i = 0; i < n; i++) {
+      var el = doc.GetElement(i)
+      var isTable = isTableElement(el)
+      if (isTable) tableOrdinal += 1
+      var text = ""
+      if (el) {
+        text = isTable
+          ? tablePreviewText(el)
+          : typeof el.GetText === "function"
+            ? String(el.GetText() || "")
+            : ""
+      }
+      var row = {
+        line: i + 1,
+        element_index: i,
+        type: isTable ? "table" : "paragraph",
+        text: text
+      }
+      if (isTable) row.table_index = tableOrdinal
+      lines.push(row)
+    }
+    return lines
+  }
+
+  function rewriteParagraphText(para, newText) {
+    if (!para) return false
+    var text = String(newText == null ? "" : newText)
+    if (typeof para.RemoveAllElements === "function") {
+      try {
+        para.RemoveAllElements()
+        if (typeof para.AddText === "function") {
+          para.AddText(text)
+          return true
+        }
+      } catch (err) {}
+    }
+    if (typeof para.GetElementsCount === "function" && typeof para.RemoveElement === "function") {
+      try {
+        var guard = 0
+        while (para.GetElementsCount() > 0 && guard < 500) {
+          para.RemoveElement(0)
+          guard += 1
+        }
+        if (typeof para.AddText === "function") {
+          para.AddText(text)
+          return true
+        }
+      } catch (err2) {}
+    }
+    return false
+  }
+
+  function countLiteralMatches(haystack, needle) {
+    if (!needle) return 0
+    var count = 0
+    var pos = 0
+    while (true) {
+      var idx = haystack.indexOf(needle, pos)
+      if (idx < 0) break
+      count += 1
+      pos = idx + needle.length
+    }
+    return count
+  }
+
   function elementStyleName(el) {
     if (!el || typeof el.GetStyle !== "function") return ""
     var style = el.GetStyle()
@@ -387,6 +470,296 @@
     return false
   }
 
+  function parseRowCol(opts) {
+    var row =
+      opts && opts.row != null && opts.row !== ""
+        ? Number(opts.row)
+        : opts && opts.row_index != null && opts.row_index !== ""
+          ? Number(opts.row_index)
+          : null
+    var col =
+      opts && opts.col != null && opts.col !== ""
+        ? Number(opts.col)
+        : opts && opts.column != null && opts.column !== ""
+          ? Number(opts.column)
+          : opts && opts.col_index != null && opts.col_index !== ""
+            ? Number(opts.col_index)
+            : null
+    return {
+      row: row != null && !isNaN(row) ? row : null,
+      col: col != null && !isNaN(col) ? col : null
+    }
+  }
+
+  function getCellPlainText(cell) {
+    if (!cell) return ""
+    if (typeof cell.GetText === "function") {
+      try {
+        return String(
+          cell.GetText({
+            TableCellSeparator: "",
+            TableRowSeparator: "",
+            ParaSeparator: "\n",
+            Numbering: false
+          }) || ""
+        )
+      } catch (err) {}
+    }
+    var content = cell.GetContent && cell.GetContent()
+    var para = content && content.GetElement && content.GetElement(0)
+    if (para && typeof para.GetText === "function") return String(para.GetText() || "")
+    return ""
+  }
+
+  function tableDims(table) {
+    var rows = typeof table.GetRowsCount === "function" ? table.GetRowsCount() : 0
+    var cols = 0
+    if (typeof table.GetColumnsCount === "function") {
+      try {
+        cols = table.GetColumnsCount() || 0
+      } catch (err) {
+        cols = 0
+      }
+    }
+    if (!cols && rows > 0 && typeof table.GetRow === "function") {
+      var first = table.GetRow(0)
+      cols = first && typeof first.GetCellsCount === "function" ? first.GetCellsCount() : 0
+    }
+    return { rows: rows, cols: cols }
+  }
+
+  function tableSummary(table, tableIndex, elementIndex) {
+    var dims = tableDims(table)
+    var preview = tablePreviewText(table)
+    return {
+      table_index: tableIndex,
+      index: elementIndex,
+      rows: dims.rows,
+      cols: dims.cols,
+      text: preview.length > 240 ? preview.slice(0, 240) : preview
+    }
+  }
+
+  function resolveTableByIndex(doc, tableIndex) {
+    var n = doc.GetElementsCount ? doc.GetElementsCount() : 0
+    var ordinal = -1
+    var i
+    for (i = 0; i < n; i++) {
+      var el = doc.GetElement(i)
+      if (!isTableElement(el)) continue
+      ordinal += 1
+      if (ordinal === tableIndex) {
+        return { ok: true, table: el, index: i, table_index: tableIndex }
+      }
+    }
+    return { ok: false, error: "Table not found (table_index=" + tableIndex + ")." }
+  }
+
+  function resolveFlatTable(doc, flatIndex) {
+    if (typeof doc.GetAllTables !== "function") {
+      return { ok: false, error: "GetAllTables unavailable (need newer OnlyOffice)." }
+    }
+    var list = doc.GetAllTables()
+    if (!list) return { ok: false, error: "No tables in document." }
+    var len = typeof list.length === "number" ? list.length : 0
+    if (typeof list.GetCount === "function") len = list.GetCount()
+    if (flatIndex < 0 || flatIndex >= len) {
+      return {
+        ok: false,
+        error: "flat_table_index out of range: " + flatIndex + " (count=" + len + ")."
+      }
+    }
+    var table = typeof list.Get === "function" ? list.Get(flatIndex) : list[flatIndex]
+    if (!table) return { ok: false, error: "Table missing at flat_table_index=" + flatIndex + "." }
+    return { ok: true, table: table, flat_table_index: flatIndex }
+  }
+
+  function getTableCell(table, rowIndex, colIndex) {
+    if (!table) return null
+    if (typeof table.GetCell === "function") {
+      try {
+        return table.GetCell(rowIndex, colIndex)
+      } catch (err) {
+        return null
+      }
+    }
+    var row = typeof table.GetRow === "function" ? table.GetRow(rowIndex) : null
+    if (!row || typeof row.GetCell !== "function") return null
+    try {
+      return row.GetCell(colIndex)
+    } catch (err2) {
+      return null
+    }
+  }
+
+  /**
+   * Land the caret in table_index (or flat_table_index) at row/col (0-based).
+   * Uses ApiTable.GetCell + ApiTableCell.Select when available.
+   */
+  function selectTableCell(doc, opts) {
+    var rc = parseRowCol(opts)
+    var tableIndex =
+      opts && opts.table_index != null && opts.table_index !== ""
+        ? Number(opts.table_index)
+        : null
+    var flatIndex =
+      opts && opts.flat_table_index != null && opts.flat_table_index !== ""
+        ? Number(opts.flat_table_index)
+        : null
+    if (rc.row == null || rc.col == null) {
+      return { ok: false, error: "row and col are required for cell targeting (0-based)." }
+    }
+    var resolved
+    if (flatIndex != null && !isNaN(flatIndex)) {
+      resolved = resolveFlatTable(doc, flatIndex)
+    } else if (tableIndex != null && !isNaN(tableIndex)) {
+      resolved = resolveTableByIndex(doc, tableIndex)
+    } else {
+      return {
+        ok: false,
+        error: "Pass table_index (top-level) or flat_table_index (GetAllTables) with row/col."
+      }
+    }
+    if (!resolved.ok) return resolved
+    var table = resolved.table
+    var dims = tableDims(table)
+    if (rc.row < 0 || rc.row >= dims.rows) {
+      return {
+        ok: false,
+        error: "Row out of range: " + rc.row + " (rows=" + dims.rows + ")."
+      }
+    }
+    var rowObj = table.GetRow(rc.row)
+    var rowCols =
+      rowObj && typeof rowObj.GetCellsCount === "function" ? rowObj.GetCellsCount() : dims.cols
+    if (rc.col < 0 || rc.col >= rowCols) {
+      return {
+        ok: false,
+        error:
+          "Col out of range: " + rc.col + " (cols=" + rowCols + " in row " + rc.row + ")."
+      }
+    }
+    var cell = getTableCell(table, rc.row, rc.col)
+    if (!cell) {
+      return {
+        ok: false,
+        error: "Cell not found at (" + rc.row + "," + rc.col + ")."
+      }
+    }
+    var selected = false
+    if (typeof cell.Select === "function") {
+      try {
+        cell.Select()
+        selected = true
+      } catch (err) {
+        selected = false
+      }
+    }
+    if (!selected) {
+      var content = cell.GetContent && cell.GetContent()
+      var para = content && content.GetElement ? content.GetElement(0) : null
+      selected = selectAtElementStart(para || content)
+    }
+    if (!selected) {
+      return {
+        ok: false,
+        error: "Could not select cell (" + rc.row + "," + rc.col + ")."
+      }
+    }
+    var verified = null
+    if (typeof doc.GetActiveTable === "function") {
+      try {
+        var active = doc.GetActiveTable()
+        verified = {
+          in_table: !!active,
+          row: typeof cell.GetRowIndex === "function" ? cell.GetRowIndex() : rc.row,
+          col: typeof cell.GetIndex === "function" ? cell.GetIndex() : rc.col
+        }
+        if (verified.in_table && verified.row != null && verified.row !== rc.row) {
+          return {
+            ok: false,
+            error:
+              "Cell select verify failed: expected row " +
+              rc.row +
+              " got " +
+              verified.row +
+              "."
+          }
+        }
+        if (verified.in_table && verified.col != null && verified.col !== rc.col) {
+          return {
+            ok: false,
+            error:
+              "Cell select verify failed: expected col " +
+              rc.col +
+              " got " +
+              verified.col +
+              "."
+          }
+        }
+      } catch (err2) {
+        verified = { in_table: null }
+      }
+    }
+    return {
+      ok: true,
+      table_index: resolved.table_index != null ? resolved.table_index : null,
+      flat_table_index: resolved.flat_table_index != null ? resolved.flat_table_index : null,
+      index: resolved.index != null ? resolved.index : null,
+      row: rc.row,
+      col: rc.col,
+      cell_text: getCellPlainText(cell),
+      rows: dims.rows,
+      cols: dims.cols,
+      verified: verified,
+      type: "cell"
+    }
+  }
+
+  function writeTableCell(doc, opts, text, mode) {
+    var landed = selectTableCell(doc, opts)
+    if (!landed.ok) return landed
+    var table
+    if (landed.flat_table_index != null) {
+      var flat = resolveFlatTable(doc, landed.flat_table_index)
+      if (!flat.ok) return flat
+      table = flat.table
+    } else {
+      var top = resolveTableByIndex(doc, landed.table_index)
+      if (!top.ok) return top
+      table = top.table
+    }
+    var cell = getTableCell(table, landed.row, landed.col)
+    if (!cell) {
+      return { ok: false, error: "Cell disappeared after select." }
+    }
+    var writeMode = mode === "replace" || mode === "set" ? "replace" : "append"
+    var chunk = text == null ? "" : String(text)
+    if (writeMode === "replace" && typeof cell.SetText === "function") {
+      cell.SetText(chunk)
+    } else if (typeof cell.AddText === "function") {
+      cell.AddText(chunk)
+    } else {
+      var content = cell.GetContent && cell.GetContent()
+      var para = content && content.GetElement ? content.GetElement(0) : null
+      if (para && para.AddText) para.AddText(chunk)
+      else return { ok: false, error: "Cell AddText/SetText unavailable." }
+    }
+    return {
+      ok: true,
+      table_index: landed.table_index,
+      flat_table_index: landed.flat_table_index,
+      index: landed.index,
+      row: landed.row,
+      col: landed.col,
+      cell_mode: writeMode,
+      cell_text: getCellPlainText(cell),
+      inserted: chunk.length,
+      type: "cell",
+      verified: landed.verified
+    }
+  }
+
   function insertParasAt(doc, paras, insertAt, placement) {
     if (!paras || !paras.length) return false
     var pos = insertAt == null || insertAt === "" ? null : Number(insertAt)
@@ -460,10 +833,23 @@
       isTableElement,
       tablePreviewText,
       elementText,
+      clipText,
+      listLogicalLines,
+      rewriteParagraphText,
+      countLiteralMatches,
       elementStyleName,
       normalizePlacement,
       resolveDocTarget,
       selectAtElementStart,
+      parseRowCol,
+      getCellPlainText,
+      tableDims,
+      tableSummary,
+      resolveTableByIndex,
+      resolveFlatTable,
+      getTableCell,
+      selectTableCell,
+      writeTableCell,
       insertParasAt
     ]
       .map(function (f) {
@@ -652,6 +1038,7 @@
             var items = []
             var elements = []
             var tables = []
+            var flat_tables = []
             var tableOrdinal = 0
             var n = doc.GetElementsCount()
             var i
@@ -669,11 +1056,10 @@
               }
               if (isTable) {
                 row.table_index = tableOrdinal
-                tables.push({
-                  index: i,
-                  table_index: tableOrdinal,
-                  text: row.text
-                })
+                var summary = tableSummary(el, tableOrdinal, i)
+                row.rows = summary.rows
+                row.cols = summary.cols
+                tables.push(summary)
                 tableOrdinal += 1
               }
               elements.push(row)
@@ -708,7 +1094,33 @@
                 })
               }
             }
-            return { outline: items, elements: elements, tables: tables }
+            // Nested tables (e.g. yearly grid inside a RAC wrapper) via GetAllTables.
+            if (typeof doc.GetAllTables === "function") {
+              try {
+                var all = doc.GetAllTables()
+                var allLen = all && typeof all.length === "number" ? all.length : 0
+                if (all && typeof all.GetCount === "function") allLen = all.GetCount()
+                var fi
+                for (fi = 0; fi < allLen; fi++) {
+                  var nest = typeof all.Get === "function" ? all.Get(fi) : all[fi]
+                  if (!nest) continue
+                  var nestDims = tableDims(nest)
+                  var nestText = tablePreviewText(nest)
+                  flat_tables.push({
+                    flat_table_index: fi,
+                    rows: nestDims.rows,
+                    cols: nestDims.cols,
+                    text: nestText.length > 240 ? nestText.slice(0, 240) : nestText
+                  })
+                }
+              } catch (errFlat) {}
+            }
+            return {
+              outline: items,
+              elements: elements,
+              tables: tables,
+              flat_tables: flat_tables
+            }
           },
           function (info, error) {
             if (error) reply(requestId, null, error)
@@ -724,7 +1136,8 @@
               reply(requestId, {
                 outline: body.outline || [],
                 elements: body.elements || [],
-                tables: body.tables || []
+                tables: body.tables || [],
+                flat_tables: body.flat_tables || []
               })
             }
           },
@@ -807,6 +1220,15 @@
                 : null,
           index: payload.index,
           table_index: payload.table_index,
+          flat_table_index: payload.flat_table_index,
+          row: payload.row != null ? payload.row : payload.row_index,
+          col:
+            payload.col != null
+              ? payload.col
+              : payload.column != null
+                ? payload.column
+                : payload.col_index,
+          cell_mode: payload.cell_mode || payload.mode || "append",
           target: payload.target
         })
         callDoc(function () {
@@ -853,6 +1275,23 @@
           }
           if (typeof Api.GetDocument !== "function") return { ok: false, error: "No document." }
           var doc = Api.GetDocument()
+          var cellTarget = parseRowCol(s)
+          // In-cell write: ApiTableCell.AddText/SetText — never AddElement (breaks table).
+          if (cellTarget.row != null && cellTarget.col != null) {
+            var plain = plainFromParagraphs(s.paragraphs)
+            if (!plain && s.text) plain = String(s.text)
+            return writeTableCell(
+              doc,
+              {
+                table_index: s.table_index,
+                flat_table_index: s.flat_table_index,
+                row: cellTarget.row,
+                col: cellTarget.col
+              },
+              plain,
+              s.cell_mode
+            )
+          }
           var placement = normalizePlacement(s.placement)
           var resolved = null
           var wantsTarget =
@@ -1105,6 +1544,14 @@
           heading: useHeading ? headingText : headingText || null,
           index: useHeading ? null : rawIndex,
           table_index: payload.table_index,
+          flat_table_index: payload.flat_table_index,
+          row: payload.row != null ? payload.row : payload.row_index,
+          col:
+            payload.col != null
+              ? payload.col
+              : payload.column != null
+                ? payload.column
+                : payload.col_index,
           page: payload.page,
           target: payload.target,
           placement: placement
@@ -1120,6 +1567,15 @@
           function () {
             var s = Asc.scope
             var doc = Api.GetDocument()
+            var cellTarget = parseRowCol(s)
+            if (cellTarget.row != null && cellTarget.col != null) {
+              return selectTableCell(doc, {
+                table_index: s.table_index,
+                flat_table_index: s.flat_table_index,
+                row: cellTarget.row,
+                col: cellTarget.col
+              })
+            }
             var resolved = resolveDocTarget(doc, {
               heading: s.heading,
               index: s.index,
@@ -1165,13 +1621,26 @@
             } else {
               selectAtElementStart(target)
             }
+            var tableMeta = null
+            if (resolved.type === "table" && isTableElement(target)) {
+              var dims = tableDims(target)
+              tableMeta = { rows: dims.rows, cols: dims.cols }
+              if (typeof doc.GetActiveTable === "function") {
+                try {
+                  tableMeta.verified_in_table = !!doc.GetActiveTable()
+                } catch (errActive) {
+                  tableMeta.verified_in_table = null
+                }
+              }
+            }
             return {
               ok: true,
               index: resolved.index,
               insert_at: resolved.insert_at,
               placement: resolved.placement,
               heading: resolved.heading,
-              type: resolved.type
+              type: resolved.type,
+              table: tableMeta
             }
           },
           function (info, error) {
@@ -1232,6 +1701,295 @@
           if (error) reply(requestId, null, error)
           else reply(requestId, info || { replaced: false, find: find })
         })
+        return
+      }
+
+      // Line-oriented Word tools (like files_grep / files_read / files_replace).
+      // Indexing: 1-based line = top-level element ordinal (same as outline.elements).
+      if (type === "grep" || type === "read" || type === "replace") {
+        setScope({
+          cmd: type,
+          pattern: payload.pattern != null ? String(payload.pattern) : "",
+          old_string: payload.old_string != null ? String(payload.old_string) : "",
+          new_string: payload.new_string != null ? String(payload.new_string) : "",
+          replace_all: payload.replace_all === true,
+          start_line: payload.start_line,
+          end_line: payload.end_line,
+          context: payload.context,
+          max_matches: payload.max_matches
+        })
+        callDoc(
+          function () {
+            var s = Asc.scope
+            if (typeof Api.GetDocument !== "function") {
+              return { ok: false, error: "Not a Word document." }
+            }
+            var doc = Api.GetDocument()
+            var all = listLogicalLines(doc)
+            var lineCount = all.length
+            var startLine =
+              s.start_line != null && s.start_line !== "" ? Number(s.start_line) : null
+            var endLine = s.end_line != null && s.end_line !== "" ? Number(s.end_line) : null
+            var MAX_READ = 80
+            var MAX_MATCHES = 40
+            var MAX_CONTEXT = 3
+            var CLIP = 500
+
+            function inScope(line) {
+              if (startLine != null && !isNaN(startLine) && line.line < startLine) return false
+              if (endLine != null && !isNaN(endLine) && line.line > endLine) return false
+              return true
+            }
+
+            function scopedRows() {
+              return all.filter(inScope)
+            }
+
+            if (s.cmd === "grep") {
+              var pattern = String(s.pattern || "")
+              if (!pattern) return { ok: false, error: "pattern is required." }
+              var re
+              try {
+                re = new RegExp(pattern)
+              } catch (errRe) {
+                return { ok: false, error: "invalid pattern: " + (errRe && errRe.message ? errRe.message : errRe) }
+              }
+              var ctx = Number(s.context)
+              if (isNaN(ctx) || ctx < 0) ctx = 2
+              if (ctx > MAX_CONTEXT) ctx = MAX_CONTEXT
+              var cap = Number(s.max_matches)
+              if (isNaN(cap) || cap < 1) cap = 20
+              if (cap > MAX_MATCHES) cap = MAX_MATCHES
+              var rows = scopedRows()
+              var matches = []
+              var truncated = false
+              var mi
+              for (mi = 0; mi < rows.length; mi++) {
+                var row = rows[mi]
+                if (!re.test(row.text || "")) continue
+                if (matches.length >= cap) {
+                  truncated = true
+                  break
+                }
+                var from = Math.max(0, row.element_index - ctx)
+                var to = Math.min(all.length - 1, row.element_index + ctx)
+                var previewParts = []
+                var pi
+                for (pi = from; pi <= to; pi++) {
+                  var pref = all[pi]
+                  var sign = pref.line === row.line ? ">" : " "
+                  previewParts.push(
+                    sign + " " + pref.line + "|" + clipText(pref.text || "", CLIP)
+                  )
+                }
+                matches.push({
+                  line: row.line,
+                  element_index: row.element_index,
+                  type: row.type,
+                  text: clipText(row.text || "", CLIP),
+                  preview: previewParts.join("\n"),
+                  table_index: row.table_index
+                })
+              }
+              return {
+                ok: true,
+                indexing: "paragraph",
+                line_count: lineCount,
+                match_count: matches.length,
+                truncated: truncated,
+                matches: matches
+              }
+            }
+
+            if (s.cmd === "read") {
+              var startN = startLine != null && !isNaN(startLine) ? startLine : 1
+              if (startN < 1) return { ok: false, error: "start_line must be >= 1" }
+              if (lineCount === 0 && startN === 1) {
+                return {
+                  ok: true,
+                  indexing: "paragraph",
+                  line_count: 0,
+                  start_line: 1,
+                  end_line: 0,
+                  clipped: false,
+                  lines: []
+                }
+              }
+              if (lineCount === 0) return { ok: false, error: "start_line is past the end" }
+              if (startN > lineCount) {
+                return {
+                  ok: false,
+                  error: "start_line " + startN + " is past line " + lineCount
+                }
+              }
+              var requestedEnd =
+                endLine != null && !isNaN(endLine) ? endLine : startN + MAX_READ - 1
+              if (requestedEnd < startN) {
+                return { ok: false, error: "end_line must be >= start_line" }
+              }
+              var finish = Math.min(requestedEnd, startN + MAX_READ - 1, lineCount)
+              var outLines = []
+              var li
+              for (li = startN; li <= finish; li++) {
+                var item = all[li - 1]
+                outLines.push({
+                  line: item.line,
+                  element_index: item.element_index,
+                  type: item.type,
+                  text: item.text || "",
+                  table_index: item.table_index
+                })
+              }
+              return {
+                ok: true,
+                indexing: "paragraph",
+                line_count: lineCount,
+                start_line: startN,
+                end_line: finish,
+                clipped: requestedEnd > finish,
+                lines: outLines
+              }
+            }
+
+            // replace
+            var oldString = String(s.old_string || "")
+            var patternSrc = String(s.pattern || "")
+            var newString = String(s.new_string != null ? s.new_string : "")
+            var replaceAll = s.replace_all === true
+            if (!oldString && !patternSrc) {
+              return { ok: false, error: "Pass old_string or pattern" }
+            }
+            if (oldString && patternSrc) {
+              return { ok: false, error: "Pass old_string or pattern, not both" }
+            }
+            if (oldString && !oldString.length) {
+              return { ok: false, error: "old_string is empty" }
+            }
+            var replaceRe = null
+            if (patternSrc) {
+              try {
+                replaceRe = new RegExp(patternSrc, replaceAll ? "g" : "")
+              } catch (errPat) {
+                return {
+                  ok: false,
+                  error: "invalid pattern: " + (errPat && errPat.message ? errPat.message : errPat)
+                }
+              }
+            }
+
+            var candidates = scopedRows()
+            var hitLines = []
+            var totalMatches = 0
+            var ci
+            for (ci = 0; ci < candidates.length; ci++) {
+              var cand = candidates[ci]
+              if (cand.type === "table") {
+                var tableHit = false
+                if (oldString) tableHit = (cand.text || "").indexOf(oldString) >= 0
+                else tableHit = replaceRe.test(cand.text || "")
+                if (tableHit) {
+                  return {
+                    ok: false,
+                    error:
+                      "Match is inside a table line (line " +
+                      cand.line +
+                      ", table_index=" +
+                      cand.table_index +
+                      "). Use doc_insert_text / cell tools with table_index+row+col, not doc_replace.",
+                    line: cand.line,
+                    table_index: cand.table_index
+                  }
+                }
+                continue
+              }
+              var hay = cand.text || ""
+              var nHits = 0
+              if (oldString) nHits = countLiteralMatches(hay, oldString)
+              else {
+                var flags = replaceAll ? "g" : ""
+                var scanRe
+                try {
+                  scanRe = new RegExp(patternSrc, flags)
+                } catch (errScan) {
+                  return { ok: false, error: "invalid pattern" }
+                }
+                var m
+                if (flags.indexOf("g") >= 0) {
+                  while ((m = scanRe.exec(hay)) !== null) {
+                    if (!m[0].length) break
+                    nHits += 1
+                    if (nHits > 100) break
+                  }
+                } else if (scanRe.test(hay)) {
+                  nHits = 1
+                }
+              }
+              if (nHits > 0) {
+                totalMatches += nHits
+                hitLines.push({ line: cand.line, element_index: cand.element_index, hits: nHits, before: hay })
+              }
+            }
+
+            if (totalMatches === 0) return { ok: false, error: "No match" }
+            if (!replaceAll && totalMatches !== 1) {
+              return {
+                ok: false,
+                error:
+                  "Matched " +
+                  totalMatches +
+                  " times. Pass replace_all or a unique old_string/pattern.",
+                match_count: totalMatches,
+                match_lines: hitLines.map(function (h) {
+                  return h.line
+                }),
+                snippets: hitLines.slice(0, 8).map(function (h) {
+                  return { line: h.line, text: clipText(h.before, 160) }
+                })
+              }
+            }
+
+            var replacements = 0
+            var hunkParts = []
+            var hi
+            for (hi = 0; hi < hitLines.length; hi++) {
+              var hit = hitLines[hi]
+              var para = doc.GetElement(hit.element_index)
+              if (!para || isTableElement(para)) continue
+              var before = hit.before
+              var after
+              if (oldString) {
+                after = replaceAll
+                  ? before.split(oldString).join(newString)
+                  : before.replace(oldString, newString)
+              } else {
+                var applyRe = new RegExp(patternSrc, replaceAll ? "g" : "")
+                after = before.replace(applyRe, newString)
+              }
+              if (after === before) continue
+              if (!rewriteParagraphText(para, after)) {
+                return {
+                  ok: false,
+                  error: "Could not rewrite paragraph at line " + hit.line + "."
+                }
+              }
+              replacements += replaceAll ? hit.hits : 1
+              hunkParts.push("- " + hit.line + "|" + clipText(before, CLIP))
+              hunkParts.push("+ " + hit.line + "|" + clipText(after, CLIP))
+            }
+
+            return {
+              ok: true,
+              indexing: "paragraph",
+              replacements: replacements,
+              line_count: lineCount,
+              hunk: hunkParts.join("\n")
+            }
+          },
+          function (info, error) {
+            replyCommand(requestId, info, error)
+          },
+          { timeoutMs: 20000, retries: 1 }
+        )
         return
       }
 
